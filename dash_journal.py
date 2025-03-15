@@ -56,7 +56,8 @@ class DashboardState:
     def load_data(self) -> Optional[pd.DataFrame]:
         """Load and process the journal data"""
         try:
-            df = pd.read_csv(OUTPUT_DIR / 'reflections_annotated.csv')
+            # Use journal_entries_annotated.csv as the base file
+            df = pd.read_csv(OUTPUT_DIR / 'journal_entries_annotated.csv')
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values('Date', ascending=False)
             df['Tags'], df['Tags_Tooltip'] = zip(*df['topic'].apply(self.get_tag_emojis))
@@ -98,12 +99,17 @@ class DashboardState:
 
         # Add scatter points for each journal entry
         for idx, row in df.iterrows():
-            # Create hover text with sentence boundaries
+            # Handle NaN or empty content
             content = row['Content']
-            # Add newline after each sentence (assuming sentences end with .!?)
-            content = content.replace('. ', '.<br>').replace('! ', '!<br>').replace('? ', '?<br>')
+            if pd.isna(content):
+                content = "(No content)"
+            else:
+                # Add newline after each sentence (assuming sentences end with .!?)
+                content = str(content).replace('. ', '.<br>').replace('! ', '!<br>').replace('? ', '?<br>')
             
             hover_text = f"Date: {row['Date'].strftime('%Y-%m-%d')}<br>"
+            if not pd.isna(row['Title']):
+                hover_text += f"Title: {row['Title']}<br>"
             hover_text += f"#{row['emotion']} {row['Tags']}<br>"
             hover_text += f"Content: {content[:200]}..." if len(content) > 200 else f"Content: {content}"
             
@@ -170,9 +176,9 @@ class DashboardState:
             if not self._run_script(['python', str(extract_script)], env):
                 return False
 
-            # Run annotation
+            # Run annotation with the new input file
             annotate_script = SCRIPT_DIR / 'annotate_journal.py'
-            cmd = ['python', str(annotate_script)]
+            cmd = ['python', str(annotate_script), '--input', 'journal_entries.csv']
             if retag_all:
                 cmd.append('--retag-all')
                 logging.info("Re-tagging all entries...")
@@ -297,6 +303,7 @@ def create_layout() -> dbc.Container:
                     id='journal-table',
                     columns=[
                         {"name": "Date", "id": "Date"},
+                        {"name": "Time", "id": "Time"},
                         {"name": "Title", "id": "Title"},
                         {"name": "Emotion", "id": "emotion"},
                         {"name": "Tags", "id": "Tags"},
@@ -308,8 +315,20 @@ def create_layout() -> dbc.Container:
                         'textAlign': 'left',
                         'padding': '10px',
                         'whiteSpace': 'pre-wrap',
-                        'height': 'auto'
+                        'height': 'auto',
+                        'minWidth': '50px',
+                        'maxWidth': '500px',
+                        'overflow': 'hidden',
+                        'textOverflow': 'ellipsis',
                     },
+                    style_cell_conditional=[
+                        {'if': {'column_id': 'Date'}, 'width': '100px'},
+                        {'if': {'column_id': 'Time'}, 'width': '80px'},
+                        {'if': {'column_id': 'Title'}, 'width': '150px'},
+                        {'if': {'column_id': 'emotion'}, 'width': '100px'},
+                        {'if': {'column_id': 'Tags'}, 'width': '150px'},
+                        {'if': {'column_id': 'Content'}, 'width': '400px'},
+                    ],
                     style_header={
                         'backgroundColor': 'rgb(230, 230, 230)',
                         'fontWeight': 'bold'

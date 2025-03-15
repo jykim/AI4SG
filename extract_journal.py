@@ -21,12 +21,59 @@ def extract_date_and_title_from_filename(filename):
     
     return date, title
 
+def extract_time_from_title(title):
+    """Extract time from title if present (format: 10am / 7pm)"""
+    time_match = re.search(r'(\d{1,2}(?::\d{2})?\s*(?:am|pm))', title.lower())
+    if time_match:
+        return time_match.group(1)
+    return None
+
+def extract_time_and_title_from_header(header):
+    """Extract time and title from a header line (format: ### 10am Title)"""
+    if not header.startswith('### '):
+        return None, None
+        
+    # Remove the ### prefix
+    header = header[4:].strip()
+    
+    # Extract time
+    time = extract_time_from_title(header)
+    if not time:
+        return None, None
+        
+    # Extract title (everything after the time)
+    title = header[header.find(time) + len(time):].strip()
+    
+    return time, title
+
 def split_into_parts(content):
     """Split content into parts using h3 headers or horizontal lines"""
-    # Split by horizontal lines or h3 headers
-    parts = re.split(r'(?:^|\n)(?:---|### .*)\n', content)
-    # Remove empty parts and strip whitespace
-    return [part.strip() for part in parts if part.strip()]
+    # First, handle the first header if it exists
+    parts = []
+    current_part = []
+    
+    for line in content.split('\n'):
+        if line.startswith('### '):
+            # If we have collected content, add it as a part
+            if current_part:
+                parts.append('\n'.join(current_part).strip())
+                current_part = []
+            # Add the header line
+            current_part.append(line)
+        elif line.strip() == '---':
+            # If we have collected content, add it as a part
+            if current_part:
+                parts.append('\n'.join(current_part).strip())
+                current_part = []
+        else:
+            current_part.append(line)
+    
+    # Add the last part if it exists
+    if current_part:
+        parts.append('\n'.join(current_part).strip())
+    
+    # Remove empty parts
+    return [part for part in parts if part.strip()]
 
 def is_only_links_or_code(content):
     """Check if content contains only links or code blocks"""
@@ -42,6 +89,14 @@ def is_only_links_or_code(content):
         return True
         
     return False
+
+def extract_title_from_heading(content):
+    """Extract title from the first heading in content if present"""
+    lines = content.split('\n')
+    for line in lines:
+        if line.startswith('### '):
+            return line[4:].strip()
+    return None
 
 def process_markdown_file(file_path):
     """Process a single markdown file and extract sections"""
@@ -69,8 +124,8 @@ def process_markdown_file(file_path):
         if not section_title or section_title == '---':
             continue
             
-        # Only process Reflections section
-        if section_title != 'Reflections':
+        # Only process Reflections and Schedule sections
+        if section_title not in ['Reflections', 'Schedule']:
             continue
             
         content = lines[1].strip() if len(lines) > 1 else ""
@@ -87,7 +142,29 @@ def process_markdown_file(file_path):
             # Skip if part is empty, just a horizontal line, or only contains links/code
             if not part or part == '---' or is_only_links_or_code(part):
                 continue
-            entries.append((date, title, section_title, part))
+                
+            # Extract time and title from header for Schedule sections
+            time = None
+            entry_title = title
+            if section_title == 'Schedule':
+                # Extract time and title from the first line if it's a header
+                first_line = part.split('\n')[0]
+                if first_line.startswith('### '):
+                    time, schedule_title = extract_time_and_title_from_header(first_line)
+                    # Use schedule title as the main title
+                    entry_title = schedule_title
+                    # Remove the header line from content
+                    part = '\n'.join(part.split('\n')[1:]).strip()
+            else:
+                # For Reflections, try to extract title from heading
+                heading_title = extract_title_from_heading(part)
+                if heading_title:
+                    entry_title = heading_title
+                    # Remove the heading line from content
+                    lines = part.split('\n')
+                    part = '\n'.join([l for l in lines if not l.startswith('### ')]).strip()
+                
+            entries.append((date, entry_title, section_title, part, time))
     
     return entries
 
@@ -100,8 +177,8 @@ def main():
     journal_dir = Path('/Users/lifidea/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal')
     
     # Output files
-    output_md = output_dir / 'reflections.md'
-    output_csv = output_dir / 'reflections.csv'
+    output_md = output_dir / 'journal_entries.md'
+    output_csv = output_dir / 'journal_entries.csv'
     
     all_entries = []
     
@@ -110,23 +187,26 @@ def main():
         entries = process_markdown_file(file_path)
         all_entries.extend(entries)
     
-    # Sort entries by date
-    all_entries.sort(key=lambda x: x[0] if x[0] else '')
+    # Sort entries by date and time
+    all_entries.sort(key=lambda x: (x[0] if x[0] else '', x[4] if x[4] else ''))
     
     # Write to markdown file
     with open(output_md, 'w', encoding='utf-8') as f:
-        for date, title, section_title, content in all_entries:
+        for date, title, section_title, content, time in all_entries:
             f.write(f'## {date} {title}\n')
+            if time:
+                f.write(f'**Time:** {time}\n')
+            f.write(f'**Section:** {section_title}\n')
             f.write(f'{content}\n\n')
     
     # Write to CSV file
     with open(output_csv, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Date', 'Title', 'Section', 'Content'])
-        for date, title, section_title, content in all_entries:
-            writer.writerow([date, title, section_title, content])
+        writer.writerow(['Date', 'Title', 'Section', 'Content', 'Time'])
+        for date, title, section_title, content, time in all_entries:
+            writer.writerow([date, title, section_title, content, time])
     
-    print(f"Processed {len(all_entries)} reflection entries from journal files")
+    print(f"Processed {len(all_entries)} entries from journal files")
     print(f"Results saved to {output_md} and {output_csv}")
 
 if __name__ == '__main__':

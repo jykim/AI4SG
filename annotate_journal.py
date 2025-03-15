@@ -24,6 +24,7 @@ import openai
 import argparse
 import re
 from pathlib import Path
+import pandas as pd
 
 # OpenAI API configuration
 openai.api_key = "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"
@@ -142,102 +143,158 @@ def is_entry_untagged(entry):
     
     return is_untagged
 
-def update_csv_with_tags(input_csv_file, retag_all=False):
+def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_run=False):
     """
     Process journal entries and add semantic tags.
     
     Args:
         input_csv_file (str): Path to input CSV file
         retag_all (bool): Whether to retag all entries or just new/untagged ones
-        
-    The function:
-    1. Reads entries from input file
-    2. Checks for existing annotated file
-    3. Identifies new or untagged entries
-    4. Gets tags using GPT-4
-    5. Saves updated entries to annotated file
+        target_date (str): Optional date to process (format: YYYY-MM-DD)
+        dry_run (bool): If True, prints results without writing to file
     """
     # Get output directory from environment variable or use default
     output_dir = Path(os.environ.get('OUTPUT_DIR', 'output'))
     output_dir.mkdir(exist_ok=True)
     
-    # Convert input path to Path object and ensure it's in output directory
+    # Convert input path to Path object
     input_path = Path(input_csv_file)
     if not input_path.is_absolute():
-        input_path = output_dir / input_path
+        # If relative path doesn't exist in current directory, try in output directory
+        if not input_path.exists() and (output_dir / input_path.name).exists():
+            input_path = output_dir / input_path.name
     
     # Read input CSV first
     input_entries = []
     with open(input_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        input_entries = list(reader)
+        # Add original_index to preserve order
+        for idx, entry in enumerate(reader):
+            entry['original_index'] = idx
+            input_entries.append(entry)
     
-    print(f"\nFound {len(input_entries)} entries in input file")
+    # Filter entries by date if specified
+    if target_date:
+        input_entries = [e for e in input_entries if e['Date'] == target_date]
+        print(f"\nFound {len(input_entries)} entries for date {target_date}")
+    else:
+        print(f"\nFound {len(input_entries)} total entries in input file")
     
-    # Handle existing annotated file
-    output_csv_file = output_dir / 'reflections_annotated.csv'
+    # Handle existing annotated file - use input filename with _annotated suffix
+    output_filename = input_path.stem
+    if target_date:
+        output_filename += f'_{target_date}'
+    output_filename += '_annotated.csv'
+    output_csv_file = output_dir / output_filename
+    existing_entries = []
     if output_csv_file.exists():
-        # Read existing annotations
         with open(output_csv_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             existing_entries = list(reader)
-        print(f"Found {len(existing_entries)} entries in annotated file")
+        print(f"Found {len(existing_entries)} entries in annotated file\n")
+    
+    # Create lookup of existing entries by date+title+content (for entries with no title)
+    existing_lookup = {}
+    for e in existing_entries:
+        # Preserve original_index from input entries if available
+        if not e.get('original_index'):
+            for input_entry in input_entries:
+                if (input_entry['Date'] == e['Date'] and 
+                    input_entry['Title'] == e['Title'] and 
+                    input_entry['Content'] == e['Content']):
+                    e['original_index'] = input_entry['original_index']
+                    break
         
-        # Find new entries by comparing dates and content
-        existing_keys = {(e['Date'], e['Content']) for e in existing_entries}
-        new_entries = [e for e in input_entries if (e['Date'], e['Content']) not in existing_keys]
-        
-        if new_entries:
-            print(f"\nFound {len(new_entries)} new entries to process")
-            # Initialize tag fields for new entries
-            for entry in new_entries:
-                entry['emotion'] = ''
-                entry['topic'] = ''
-                entry['etc'] = ''
-            entries = existing_entries + new_entries
+        # For entries with no title, use a combination of date and content
+        if not e['Title']:
+            key = (e['Date'], e['Content'][:100])  # Use first 100 chars of content as key
         else:
-            print("\nNo new entries found")
-            entries = existing_entries
-    else:
-        print("\nNo existing annotated file found, processing all entries")
-        entries = input_entries
-        # Initialize tag fields
-        for entry in entries:
-            entry['emotion'] = ''
-            entry['topic'] = ''
-            entry['etc'] = ''
+            key = (e['Date'], e['Title'])
+        existing_lookup[key] = e
     
-    # Filter entries to process
-    if not retag_all:
-        entries_to_process = [e for e in entries if is_entry_untagged(e)]
-        print(f"\nFound {len(entries_to_process)} entries to process (new or untagged)")
-    else:
-        entries_to_process = entries
-        print(f"\nRe-tagging all {len(entries_to_process)} entries")
-    
-    if not entries_to_process:
-        print("\nNo entries to process. Exiting.")
-        return
+    # Identify entries needing processing
+    entries_to_process = []
+    for entry in input_entries:
+        # Create lookup key based on whether entry has a title
+        if not entry['Title']:
+            key = (entry['Date'], entry['Content'][:100])
+        else:
+            key = (entry['Date'], entry['Title'])
+            
+        if key not in existing_lookup:
+            print(f"\nNew entry found: {entry['Date']} - {entry['Title'] or 'Untitled'}")
+            entries_to_process.append(entry)
+        elif retag_all:
+            print(f"\nRetagging: {entry['Date']} - {entry['Title'] or 'Untitled'}")
+            entries_to_process.append(entry)
+        elif not all(existing_lookup[key].get(field) for field in ['emotion', 'topic']):
+            print(f"\nUntagged entry found: {entry['Date']} - {entry['Title'] or 'Untitled'}")
+            entries_to_process.append(entry)
+        
+    print(f"\nFound {len(entries_to_process)} entries to process (new or untagged)\n")
     
     # Process entries
     for i, entry in enumerate(entries_to_process, 1):
         print(f"\nProcessing entry {i}/{len(entries_to_process)}")
-        print(f"Content length: {len(entry['Content'])} characters")
-        print(f"First 100 chars of content: {entry['Content'][:100]}...")
         
-        # Get and normalize tags
-        tags = get_tags_for_entry(entry['Content'])
-        entry['emotion'] = normalize_tags(tags.get('emotion', ''))
-        entry['topic'] = normalize_tags(tags.get('topic', ''))
-        entry['etc'] = normalize_tags(tags.get('etc', ''))
+        content = entry['Content']
+        if not content or pd.isna(content):
+            print(f"Skipping empty content for entry: {entry['Date']} - {entry['Title'] or 'Untitled'}")
+            continue
+            
+        print(f"Content length: {len(content)} characters")
+        print(f"First 100 chars of content: {content[:100]}...")
         
-        print(f"Adding tags: emotion={entry['emotion']}, topic={entry['topic']}, etc={entry['etc']}")
+        try:
+            # Get tags from GPT
+            tags = get_tags_for_entry(content)
+            if not tags:
+                print(f"Warning: No tags returned for entry: {entry['Date']} - {entry['Title'] or 'Untitled'}")
+                continue
+            
+            # Update entry with tags
+            entry.update(tags)
+            print(f"Adding tags: emotion={tags.get('emotion', '')}, topic={tags.get('topic', '')}, etc={tags.get('etc', '')}")
+            
+            # Update lookup
+            if not entry['Title']:
+                key = (entry['Date'], entry['Content'][:100])
+            else:
+                key = (entry['Date'], entry['Title'])
+            existing_lookup[key] = entry
+            
+        except Exception as e:
+            print(f"Error processing entry: {str(e)}")
+            continue
     
-    # Save results
+    # Combine all entries
+    entries = list(existing_lookup.values())
+    
+    # Sort entries by date and then by original_index
+    entries.sort(key=lambda x: (x['Date'], x.get('original_index', 999999)))
+    
+    if dry_run:
+        print("\nDRY RUN - Would write the following entries:")
+        for entry in entries:
+            if target_date and entry['Date'] == target_date:
+                print(f"\nDate: {entry['Date']}")
+                print(f"Title: {entry['Title']}")
+                print(f"Original Index: {entry.get('original_index', 'N/A')}")
+                print(f"Content preview: {entry['Content'][:50]}...")
+                print("-" * 50)
+        return
+    
+    # Write updated CSV with all fields
+    fieldnames = ['Date', 'Title', 'Section', 'Content', 'Time', 'emotion', 'topic', 'etc']
     with open(output_csv_file, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['Date', 'Title', 'Section', 'Content', 'emotion', 'topic', 'etc'])
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(entries)
+        # Remove original_index before writing
+        for entry in entries:
+            entry_copy = entry.copy()
+            if 'original_index' in entry_copy:
+                del entry_copy['original_index']
+            writer.writerow(entry_copy)
     print(f"\nCreated/Updated annotated CSV file: {output_csv_file}")
 
 def main():
@@ -248,13 +305,16 @@ def main():
     )
     parser.add_argument('--retag-all', action='store_true',
                        help='Re-tag all entries, not just untagged ones')
-    parser.add_argument('--input', default='reflections.csv',
-                       help='Input CSV file path (default: reflections.csv)')
+    parser.add_argument('--input', default='journal_entries.csv',
+                       help='Input CSV file path (default: journal_entries.csv)')
+    parser.add_argument('--date', help='Process entries for specific date (format: YYYY-MM-DD)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Print results without writing to file')
     
     args = parser.parse_args()
     
     print("Starting CSV processing...")
-    update_csv_with_tags(args.input, args.retag_all)
+    update_csv_with_tags(args.input, args.retag_all, args.date, args.dry_run)
     print("\nAnnotation complete!")
 
 if __name__ == '__main__':
