@@ -35,7 +35,6 @@ logging.basicConfig(
 class DashboardState:
     """Manages the global state of the dashboard"""
     def __init__(self):
-        self.processing_lock = threading.Lock()
         self.is_processing = False
         self.df: Optional[pd.DataFrame] = None
         self.last_entries_count = 0
@@ -43,8 +42,9 @@ class DashboardState:
         self.emotion_colors: Dict[str, str] = {}
         self.tag_emojis: Dict[str, str] = {}
         self.last_process_time = 0
-        self.processing_requested = False
         self.load_configs()
+        self.processing_lock = threading.Lock()
+        self.processing_requested = False
 
     def load_configs(self) -> None:
         """Load emotion colors and tag emojis from YAML files"""
@@ -150,7 +150,7 @@ class DashboardState:
         )
         return fig
 
-    def run_extraction_and_annotation(self, retag_all: bool = False) -> bool:
+    def run_extraction_and_annotation(self, retag_all: bool = False, force: bool = False) -> bool:
         """Run the extraction and annotation scripts in sequence"""
         current_time = time.time()
         
@@ -159,7 +159,8 @@ class DashboardState:
             if self.is_processing:
                 logging.debug("Processing already in progress, skipping...")
                 return False
-            if current_time - self.last_process_time < MIN_PROCESS_INTERVAL:
+            # Only check time interval if not forced
+            if not force and current_time - self.last_process_time < MIN_PROCESS_INTERVAL:
                 logging.debug("Skipping processing - too soon since last run")
                 return False
             self.is_processing = True
@@ -197,8 +198,7 @@ class DashboardState:
             logging.error(f"Error in background processing: {str(e)}")
             return False
         finally:
-            with self.processing_lock:
-                self.is_processing = False
+            self.is_processing = False
 
     def _run_script(self, cmd: list, env: Dict[str, str]) -> bool:
         """Run a Python script and handle its output"""
@@ -389,24 +389,19 @@ def update_status(data: list) -> str:
         return "No entries found for the selected date range."
     return f"Showing {len(data)} entries"
 
+def handle_sigtstp(signum: int, frame: Any) -> None:
+    """Handle Ctrl+Z (SIGTSTP) signal"""
+    logging.info("Received Ctrl+Z signal, triggering extraction and annotation...")
+    state.run_extraction_and_annotation(retag_all=False, force=True)  # Force run regardless of time
+
 def background_processor(retag_all: bool = False) -> None:
     """Background thread that runs extraction and annotation periodically"""
     while True:
         current_time = time.time()
-        with state.processing_lock:
-            if not state.is_processing and current_time - state.last_process_time >= MIN_PROCESS_INTERVAL:
-                state.processing_requested = True
-        
-        if state.processing_requested:
-            state.run_extraction_and_annotation(retag_all)
-        
-        time.sleep(5)  # Check every 5 seconds instead of running continuously
-
-def handle_sigtstp(signum: int, frame: Any) -> None:
-    """Handle Ctrl+Z (SIGTSTP) signal"""
-    logging.info("Received Ctrl+Z signal, triggering extraction and annotation...")
-    with state.processing_lock:
-        state.processing_requested = True
+        # Only run if enough time has passed since last run
+        if current_time - state.last_process_time >= MIN_PROCESS_INTERVAL:
+            state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
+        time.sleep(5)  # Check every 5 seconds
 
 def main() -> None:
     """Main entry point for the dashboard"""
