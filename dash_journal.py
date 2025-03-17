@@ -20,7 +20,7 @@ from typing import Optional, Tuple, Dict, Any
 OUTPUT_DIR = Path('output')
 OUTPUT_DIR.mkdir(exist_ok=True)
 SCRIPT_DIR = Path(__file__).parent.absolute()
-MIN_PROCESS_INTERVAL = 600  # Minimum seconds between processing runs
+MIN_PROCESS_INTERVAL = 600  # Minimum seconds between processing runs (10 minutes)
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +42,7 @@ class DashboardState:
         self.last_process_time = 0
         self.processing_lock = threading.Lock()
         self.processing_requested = False
+        self.last_content_hash = None  # Track content changes
 
     def load_data(self) -> Optional[pd.DataFrame]:
         """Load and process the journal data"""
@@ -56,6 +57,14 @@ class DashboardState:
             df['Tags_Tooltip'] = df.apply(lambda row: f"{row['topic_visual']} ({row['topic']}) {row['etc_visual']} ({row['etc']})", axis=1)
             
             df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+            
+            # Calculate content hash to detect changes
+            content_hash = hash(str(df.to_dict()))
+            if self.last_content_hash is not None and content_hash != self.last_content_hash:
+                logging.info("Content changes detected in journal entries")
+                self.update_event.set()
+            self.last_content_hash = content_hash
+            
             return df
         except Exception as e:
             logging.error(f"Error loading data: {str(e)}")
@@ -220,6 +229,11 @@ class DashboardState:
         self.last_entries_count = len(self.df)
         self.update_event.set()
         logging.info(f"Updated entries count: {self.last_entries_count}")
+        
+        # Force refresh the dashboard if new entries are detected
+        if not retag_all and len(new_df) > self.last_entries_count:
+            logging.info("New entries detected, forcing dashboard refresh")
+            self.update_event.set()
 
 # Initialize global state
 state = DashboardState()
@@ -381,6 +395,13 @@ def background_processor(retag_all: bool = False) -> None:
         # Only run if enough time has passed since last run
         if current_time - state.last_process_time >= MIN_PROCESS_INTERVAL:
             state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
+        # Check for content changes every 5 seconds
+        new_df = state.load_data()
+        if new_df is not None and state.df is not None:
+            if len(new_df) != len(state.df) or str(new_df.to_dict()) != str(state.df.to_dict()):
+                logging.info("Content changes detected, updating dashboard")
+                state.df = new_df
+                state.update_event.set()
         time.sleep(5)  # Check every 5 seconds
 
 def main() -> None:

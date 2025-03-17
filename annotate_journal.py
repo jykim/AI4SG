@@ -372,8 +372,9 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
     
     print(f"\nFinal number of entries: {len(final_entries)}")
     
-    # Sort entries by date and then by original_index
-    final_entries.sort(key=lambda x: (x['Date'], x.get('original_index', 999999)))
+    # Sort entries by date and time to maintain chronological order
+    final_entries = sorted(final_entries, 
+                         key=lambda x: (x['Date'], x.get('Time', '')))
     
     if dry_run:
         print("\nDRY RUN - Would write the following entries:")
