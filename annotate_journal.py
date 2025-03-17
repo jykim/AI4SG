@@ -276,7 +276,14 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         print(f"After date filter: {len(input_entries)} entries for date {target_date}")
     
     # Create a set of unique identifiers from input entries
-    input_keys = {(e['Date'], e['Content']) for e in input_entries}
+    # For entries with empty content, use Title and original_index as part of the key
+    input_keys = set()
+    for e in input_entries:
+        if not e.get('Content', '').strip():
+            key = (e['Date'], e.get('Title', ''), e.get('Time', ''), e['original_index'])
+        else:
+            key = (e['Date'], e.get('Content', ''))
+        input_keys.add(key)
     print(f"Number of unique entries in input file: {len(input_keys)}")
     
     # Handle existing annotated file - use input filename with _annotated suffix
@@ -297,22 +304,31 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             # Check for duplicates in existing annotated file
             existing_keys = set()
             for e in existing_entries:
-                key = (e['Date'], e['Content'])
+                if not e.get('Content', '').strip():
+                    key = (e['Date'], e.get('Title', ''), e.get('Time', ''), int(e.get('original_index', 0)))
+                else:
+                    key = (e['Date'], e.get('Content', ''))
                 if key in existing_keys:
                     print(f"Warning: Duplicate entry found in annotated file - Date: {e['Date']}, Title: {e['Title']}")
                 existing_keys.add(key)
             print(f"Number of unique entries in annotated file: {len(existing_keys)}")
             
-            # Create lookup using Date and Content as key
+            # Create lookup using Date and Content/Title as key
             for e in existing_entries:
-                key = (e['Date'], e['Content'])
+                if not e.get('Content', '').strip():
+                    key = (e['Date'], e.get('Title', ''), e.get('Time', ''), int(e.get('original_index', 0)))
+                else:
+                    key = (e['Date'], e.get('Content', ''))
                 if key in input_keys:  # Only keep entries that exist in input file
                     existing_lookup[key] = e
     
     # Identify entries needing processing
     entries_to_process = []
     for entry in input_entries:
-        key = (entry['Date'], entry['Content'])
+        if not entry.get('Content', '').strip():
+            key = (entry['Date'], entry.get('Title', ''), entry.get('Time', ''), entry['original_index'])
+        else:
+            key = (entry['Date'], entry.get('Content', ''))
             
         if key not in existing_lookup:
             print(f"\nNew entry found: {entry['Date']} - {entry['Title'] or 'Untitled'}")
@@ -353,8 +369,11 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             entry.update(tags)
             print(f"Adding tags: emotion={tags.get('emotion', '')}, topic={tags.get('topic', '')}, etc={tags.get('etc', '')}")
             
-            # Update lookup using Date and Content as key
-            key = (entry['Date'], entry['Content'])
+            # Update lookup using Date and Content/Title as key
+            if not entry.get('Content', '').strip():
+                key = (entry['Date'], entry.get('Title', ''), entry.get('Time', ''), entry['original_index'])
+            else:
+                key = (entry['Date'], entry.get('Content', ''))
             existing_lookup[key] = entry
             
         except Exception as e:
@@ -364,7 +383,10 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
     # Create final entries list from input entries to maintain order
     final_entries = []
     for entry in input_entries:
-        key = (entry['Date'], entry['Content'])
+        if not entry.get('Content', '').strip():
+            key = (entry['Date'], entry.get('Title', ''), entry.get('Time', ''), entry['original_index'])
+        else:
+            key = (entry['Date'], entry.get('Content', ''))
         if key in existing_lookup:
             final_entries.append(existing_lookup[key])
         else:
