@@ -292,11 +292,11 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 def create_layout() -> dbc.Container:
     """Create the dashboard layout"""
-    # Calculate default date range (last 30 days + next 7 days)
+    # Calculate default date range (past 14 days + future 7 days)
     if state.df is not None and not state.df.empty:
-        end_date = state.df['Date'].max()
-        start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-        end_date = (pd.to_datetime(end_date) + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
+        today = pd.Timestamp.now().normalize()
+        start_date = (today - pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+        end_date = (today + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
     else:
         start_date = None
         end_date = None
@@ -400,6 +400,14 @@ def create_layout() -> dbc.Container:
                             'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
                         }
                         for emotion in state.df['emotion'].unique() if state.df is not None
+                    ] + [
+                        {
+                            'if': {
+                                'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
+                                'column_id': ['Date', 'Time', 'Title']
+                            },
+                            'fontWeight': 'bold'
+                        }
                     ]
                 )
             ], width=12)
@@ -429,19 +437,19 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
     
     # Handle reset button click
     if triggered_id == 'reset-range-button':
-        end_date = state.df['Date'].max()
-        start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-        end_date = (pd.to_datetime(end_date) + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
+        today = pd.Timestamp.now().normalize()
+        start_date = (today - pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+        end_date = (today + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
     # Handle click event on timeline
     elif clickData:
         clicked_date = pd.to_datetime(clickData['points'][0]['x'])
         start_date = (clicked_date - pd.Timedelta(days=2)).strftime('%Y-%m-%d')
         end_date = clicked_date.strftime('%Y-%m-%d')
-    # If no dates selected and no click, use last 30 days
+    # If no dates selected and no click, use past 14 days + future 7 days
     elif not start_date or not end_date:
-        end_date = state.df['Date'].max()
-        start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-        end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+        today = pd.Timestamp.now().normalize()
+        start_date = (today - pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+        end_date = (today + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
     
     mask = pd.Series(True, index=state.df.index)
     mask &= state.df['Date'] >= start_date
