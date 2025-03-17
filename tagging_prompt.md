@@ -10,8 +10,9 @@ Please provide title (in Korean) which summarize the contents:
 [title]
 
 Each document can have up to 3 tags 
-Don't assign multiple tag for any dimension, especially for emotion
-The text may be in Korean or English. Please analyze the sentiment regardless of language.
+- Don't assign multiple tag for any dimension, especially for emotion
+- The text may be in Korean or English. Please analyze the sentiment regardless of language.
+- Don't put any tag if it doesn't make sense (for emotion leave it blank rather than 'neutral')
 
 Please provide tags and extra info in the format:
 emotion: [tag] / [color]

@@ -53,6 +53,11 @@ class DashboardState:
             # Clean up and parse dates, dropping any rows with invalid dates
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             df = df.dropna(subset=['Date'])  # Remove rows with invalid dates
+            
+            # Replace blank/null emotions with empty string
+            df['emotion'] = df['emotion'].fillna('')
+            df['emotion'] = df['emotion'].apply(lambda x: '' if pd.isna(x) or str(x).strip() == '' else x)
+            
             df = df.sort_values('Date', ascending=False)
             
             # Clean up title formatting - remove quotes and asterisks
@@ -276,10 +281,20 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
         full_df = df
     if full_df is None or full_df.empty:
         return '#808080'
+    if not emotion or str(emotion).lower() == 'blank':  # Handle empty emotion or 'blank'
+        return '#808080'
     emotion_rows = full_df[full_df['emotion'] == emotion]
     if emotion_rows.empty:
         return '#808080'
-    return emotion_rows['emotion_visual'].iloc[0]
+    color = emotion_rows['emotion_visual'].iloc[0]
+    # Handle NaN or invalid color values
+    if pd.isna(color) or not str(color).strip():
+        return '#808080'
+    # Convert color to string and ensure it's valid
+    color_str = str(color).strip()
+    if color_str.lower() == 'blank' or not color_str.startswith('#'):
+        return '#808080'
+    return color_str
 
 # Initialize global state
 state = DashboardState()
@@ -302,8 +317,6 @@ def create_layout() -> dbc.Container:
         end_date = None
 
     return dbc.Container([
-        html.H1("Journal Reflections Dashboard", className="text-center my-4"),
-        
         # Status indicator
         dbc.Row([
             dbc.Col([
@@ -399,7 +412,7 @@ def create_layout() -> dbc.Container:
                             },
                             'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
                         }
-                        for emotion in state.df['emotion'].unique() if state.df is not None
+                        for emotion in state.df['emotion'].unique() if state.df is not None and emotion  # Only add style for non-empty emotions
                     ] + [
                         {
                             'if': {
@@ -455,7 +468,12 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
     mask &= state.df['Date'] >= start_date
     mask &= state.df['Date'] <= end_date
     
-    filtered_df = state.df[mask]
+    filtered_df = state.df[mask].copy()
+    
+    # Replace 'blank', '/', 'blank /', 'neutral', and empty values with empty string for display
+    for col in ['emotion', 'topic', 'etc']:
+        filtered_df[col] = filtered_df[col].replace(['blank', '/', 'blank /', 'neutral', ''], '')
+    
     return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date
 
 @app.callback(
