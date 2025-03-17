@@ -49,13 +49,28 @@ class DashboardState:
         try:
             # Use journal_entries_annotated.csv as the base file
             df = pd.read_csv(OUTPUT_DIR / 'journal_entries_annotated.csv')
-            df['Date'] = pd.to_datetime(df['Date'])
+            
+            # Clean up and parse dates, dropping any rows with invalid dates
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            df = df.dropna(subset=['Date'])  # Remove rows with invalid dates
             df = df.sort_values('Date', ascending=False)
             
-            # Create Tags column with emojis
-            df['Tags'] = df.apply(lambda row: f"{row['topic_visual']} {row['etc_visual']}", axis=1)
-            df['Tags_Tooltip'] = df.apply(lambda row: f"{row['topic_visual']} ({row['topic']}) {row['etc_visual']} ({row['etc']})", axis=1)
+            # Clean up title formatting - remove quotes and asterisks
+            df['Title'] = df['Title'].apply(lambda x: str(x).strip('"*') if pd.notna(x) else x)
             
+            # Create Tags column with emojis, filtering out NaN values
+            df['Tags'] = df.apply(lambda row: ' '.join(filter(None, [
+                row['topic_visual'] if pd.notna(row['topic_visual']) else '',
+                row['etc_visual'] if pd.notna(row['etc_visual']) else ''
+            ])), axis=1)
+            
+            # Create Tags_Tooltip with filtered values
+            df['Tags_Tooltip'] = df.apply(lambda row: ' '.join(filter(None, [
+                f"{row['topic_visual']} ({row['topic']})" if pd.notna(row['topic_visual']) and pd.notna(row['topic']) else '',
+                f"{row['etc_visual']} ({row['etc']})" if pd.notna(row['etc_visual']) and pd.notna(row['etc']) else ''
+            ])), axis=1)
+            
+            # Format dates for display
             df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
             
             # Calculate content hash to detect changes
@@ -85,6 +100,16 @@ class DashboardState:
         df.loc[:, 'Y_Normalized'] = 100 - (df['Entry_Order'] / df['Entries_Per_Date']) * 100
 
         fig = go.Figure()
+
+        # Add vertical shade for today's date
+        today = pd.Timestamp.now().normalize()
+        fig.add_vrect(
+            x0=today,
+            x1=today + pd.Timedelta(days=1),
+            fillcolor="rgba(200, 200, 200, 0.2)",
+            line_width=0,
+            layer="below"
+        )
 
         # Add scatter points for each journal entry
         for idx, row in df.iterrows():
@@ -217,7 +242,9 @@ class DashboardState:
             new_entry = new_df.iloc[0]   # Most recent entry
             
             # Compare content lengths and check if new entry is a superset
-            if (len(new_entry['Content']) > len(last_entry['Content']) and 
+            if (isinstance(new_entry['Content'], str) and 
+                isinstance(last_entry['Content'], str) and
+                len(new_entry['Content']) > len(last_entry['Content']) and 
                 last_entry['Content'] in new_entry['Content']):
                 logging.info("New entry is a superset of the last entry. Removing the last entry.")
                 # Remove the last entry from existing data
@@ -246,11 +273,11 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 def create_layout() -> dbc.Container:
     """Create the dashboard layout"""
-    # Calculate default date range (last 30 days)
+    # Calculate default date range (last 30 days + next 7 days)
     if state.df is not None and not state.df.empty:
         end_date = state.df['Date'].max()
         start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-        end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+        end_date = (pd.to_datetime(end_date) + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
     else:
         start_date = None
         end_date = None
@@ -398,10 +425,20 @@ def background_processor(retag_all: bool = False) -> None:
         # Check for content changes every 5 seconds
         new_df = state.load_data()
         if new_df is not None and state.df is not None:
-            if len(new_df) != len(state.df) or str(new_df.to_dict()) != str(state.df.to_dict()):
-                logging.info("Content changes detected, updating dashboard")
+            # Compare number of rows
+            if len(new_df) != len(state.df):
+                logging.info("Number of entries changed, updating dashboard")
                 state.df = new_df
                 state.update_event.set()
+            else:
+                # Compare content of each row
+                for col in new_df.columns:
+                    if col in state.df.columns:
+                        if not (new_df[col].astype(str) == state.df[col].astype(str)).all():
+                            logging.info(f"Content changed in column {col}, updating dashboard")
+                            state.df = new_df
+                            state.update_event.set()
+                            break
         time.sleep(5)  # Check every 5 seconds
 
 def main() -> None:
