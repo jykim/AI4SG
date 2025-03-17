@@ -25,9 +25,61 @@ import argparse
 import re
 from pathlib import Path
 import pandas as pd
+import hashlib
+import json
 
 # OpenAI API configuration
 openai.api_key = "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"
+
+# Cache configuration
+CACHE_DIR = Path('api_cache')
+CACHE_DIR.mkdir(exist_ok=True)
+
+def get_cache_key(content: str) -> str:
+    """
+    Generate a cache key for the given content using SHA-256 hash.
+    
+    Args:
+        content (str): The content to generate a key for
+        
+    Returns:
+        str: The hex digest of the SHA-256 hash
+    """
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+def get_cached_response(cache_key: str) -> dict:
+    """
+    Try to get a cached response for the given key.
+    
+    Args:
+        cache_key (str): The cache key to look up
+        
+    Returns:
+        dict: The cached response if found, None otherwise
+    """
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error reading cache file: {e}")
+    return None
+
+def save_to_cache(cache_key: str, response: dict) -> None:
+    """
+    Save an API response to the cache.
+    
+    Args:
+        cache_key (str): The cache key to save under
+        response (dict): The response to cache including prompt and content
+    """
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(response, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving to cache: {e}")
 
 def load_prompt_template():
     """
@@ -45,16 +97,18 @@ def load_prompt_template():
 def get_tags_for_entry(content):
     """
     Get semantic tags for a journal entry using OpenAI's GPT-4 API.
+    Uses caching to avoid duplicate API calls.
     
     Args:
         content (str): The journal entry content to analyze
         
     Returns:
-        dict: A dictionary containing emotion, topic, and etc tags
+        tuple: (tags dict, suggested_title)
         
     Note:
         - Content is truncated if it exceeds token limits
         - Returns empty dict if API call fails
+        - Uses cached response if available
     """
     # Truncate content if too long (to avoid token limit)
     max_chars = 2000
@@ -62,35 +116,65 @@ def get_tags_for_entry(content):
         content = content[:max_chars] + "..."
 
     try:
-        # Load and format prompt template
-        prompt_template = load_prompt_template()
-        prompt = prompt_template.format(content=content)
-
-        print("\nSending request to OpenAI API...")
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that analyzes journal entries and provides semantic tags in English, even for Korean text."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        # Check cache first
+        cache_key = get_cache_key(content)
+        cached_response = get_cached_response(cache_key)
         
-        # Extract tags from response
-        tags_text = response.choices[0].message.content
+        if cached_response:
+            print("Using cached response...")
+            tags_text = cached_response['content']
+            if 'prompt' in cached_response:
+                print("(Prompt used: Journal entry analysis for tags [emotion/topic/etc])")
+        else:
+            # Load and format prompt template
+            prompt_template = load_prompt_template()
+            prompt = prompt_template.format(content=content)
+
+            print("\nSending request to OpenAI API...")
+            print("(Using prompt: Journal entry analysis for tags [emotion/topic/etc])")
+            
+            response = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that analyzes journal entries and provides semantic tags in English, even for Korean text."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            # Extract tags from response
+            tags_text = response.choices[0].message.content
+            
+            # Cache both prompt and response
+            save_to_cache(cache_key, {
+                'content': tags_text,
+                'prompt': prompt,
+                'timestamp': pd.Timestamp.now().isoformat()
+            })
+        
         print(f"\nAPI Response:\n{tags_text}")
         
-        # Parse tags from response
+        # Parse tags and title from response
         tags = {}
+        suggested_title = None
+        
         for line in tags_text.split('\n'):
             if ':' in line:
-                dimension, tag = line.split(':', 1)
-                tags[dimension.strip()] = tag.strip()
+                dimension, value = line.split(':', 1)
+                dimension = dimension.strip().lower()  # Convert dimension to lowercase
+                
+                # Extract title if found
+                if dimension == 'title':
+                    suggested_title = value.strip()
+                # Extract other tags
+                elif dimension in ['emotion', 'topic', 'etc']:
+                    # Convert tag value to lowercase and normalize
+                    tag_value = normalize_tags(value.strip().lower())
+                    tags[dimension] = tag_value
         
-        print(f"Extracted tags: {tags}")
-        return tags
+        return tags, suggested_title
     except Exception as e:
         print(f"Error getting tags: {e}")
-        return {}
+        return {}, None
 
 def normalize_tags(tag):
     """
@@ -247,12 +331,16 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         
         try:
             # Get tags from GPT
-            tags = get_tags_for_entry(content)
+            tags, suggested_title = get_tags_for_entry(content)
             if not tags:
                 print(f"Warning: No tags returned for entry: {entry['Date']} - {entry['Title'] or 'Untitled'}")
                 continue
             
-            # Update entry with tags
+            # Update entry with tags and title if needed
+            if suggested_title and not entry['Title']:
+                entry['Title'] = suggested_title
+                print(f"Using suggested title: {entry['Title']}")
+            
             entry.update(tags)
             print(f"Adding tags: emotion={tags.get('emotion', '')}, topic={tags.get('topic', '')}, etc={tags.get('etc', '')}")
             
