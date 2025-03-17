@@ -39,19 +39,9 @@ class DashboardState:
         self.df: Optional[pd.DataFrame] = None
         self.last_entries_count = 0
         self.update_event = threading.Event()
-        self.emotion_colors: Dict[str, str] = {}
-        self.tag_emojis: Dict[str, str] = {}
         self.last_process_time = 0
-        self.load_configs()
         self.processing_lock = threading.Lock()
         self.processing_requested = False
-
-    def load_configs(self) -> None:
-        """Load emotion colors and tag emojis from YAML files"""
-        with open(SCRIPT_DIR / 'emotion_colors.yaml', 'r') as f:
-            self.emotion_colors = yaml.safe_load(f)
-        with open(SCRIPT_DIR / 'tag_emojis.yaml', 'r') as f:
-            self.tag_emojis = yaml.safe_load(f)
 
     def load_data(self) -> Optional[pd.DataFrame]:
         """Load and process the journal data"""
@@ -60,26 +50,16 @@ class DashboardState:
             df = pd.read_csv(OUTPUT_DIR / 'journal_entries_annotated.csv')
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values('Date', ascending=False)
-            df['Tags'], df['Tags_Tooltip'] = zip(*df['topic'].apply(self.get_tag_emojis))
+            
+            # Create Tags column with emojis
+            df['Tags'] = df.apply(lambda row: f"{row['topic_visual']} {row['etc_visual']}", axis=1)
+            df['Tags_Tooltip'] = df.apply(lambda row: f"{row['topic_visual']} ({row['topic']}) {row['etc_visual']} ({row['etc']})", axis=1)
+            
             df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
             return df
         except Exception as e:
             logging.error(f"Error loading data: {str(e)}")
             return None
-
-    def get_tag_emojis(self, tags: str) -> Tuple[str, str]:
-        """Convert tags to emoji strings with tooltips"""
-        if pd.isna(tags):
-            return '', ''
-        tag_list = [tag.strip() for tag in tags.split(',')]
-        emoji_list = []
-        tooltip_list = []
-        for tag in tag_list:
-            emoji = self.tag_emojis.get(tag, '')
-            if emoji:
-                emoji_list.append(emoji)
-                tooltip_list.append(f"{emoji} ({tag})")
-        return ' '.join(emoji_list), ' '.join(tooltip_list)
 
     def create_timeline_figure(self, df: pd.DataFrame) -> go.Figure:
         """Create the timeline visualization"""
@@ -113,8 +93,8 @@ class DashboardState:
             hover_text += f"#{row['emotion']} {row['Tags']}<br>"
             hover_text += f"Content: {content[:200]}..." if len(content) > 200 else f"Content: {content}"
             
-            # Get color based on emotion, default to gray if emotion not in dictionary
-            color = self.emotion_colors.get(row['emotion'], '#808080')
+            # Get color from emotion_visual field, default to gray if not available
+            color = row.get('emotion_visual', '#808080')
             
             fig.add_trace(go.Scatter(
                 x=[row['Date']],
@@ -238,8 +218,6 @@ class DashboardState:
         # Update with new data
         self.df = new_df
         self.last_entries_count = len(self.df)
-        # Reload configs to get any new emotion colors
-        self.load_configs()
         self.update_event.set()
         logging.info(f"Updated entries count: {self.last_entries_count}")
 
@@ -306,6 +284,7 @@ def create_layout() -> dbc.Container:
                         {"name": "Time", "id": "Time"},
                         {"name": "Title", "id": "Title"},
                         {"name": "Emotion", "id": "emotion"},
+                        {"name": "Topic", "id": "topic"},
                         {"name": "Tags", "id": "Tags"},
                         {"name": "Content", "id": "Content"}
                     ],
@@ -326,6 +305,7 @@ def create_layout() -> dbc.Container:
                         {'if': {'column_id': 'Time'}, 'width': '80px'},
                         {'if': {'column_id': 'Title'}, 'width': '150px'},
                         {'if': {'column_id': 'emotion'}, 'width': '100px'},
+                        {'if': {'column_id': 'topic'}, 'width': '100px'},
                         {'if': {'column_id': 'Tags'}, 'width': '150px'},
                         {'if': {'column_id': 'Content'}, 'width': '400px'},
                     ],
@@ -344,9 +324,9 @@ def create_layout() -> dbc.Container:
                                 'filter_query': f'{{emotion}} = "{emotion}"',
                                 'column_id': 'emotion'
                             },
-                            'backgroundColor': color
+                            'backgroundColor': state.df[state.df['emotion'] == emotion]['emotion_visual'].iloc[0] if state.df is not None and not state.df[state.df['emotion'] == emotion].empty else '#808080'
                         }
-                        for emotion, color in state.emotion_colors.items()
+                        for emotion in state.df['emotion'].unique() if state.df is not None
                     ]
                 )
             ], width=12)

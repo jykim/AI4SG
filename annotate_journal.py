@@ -167,9 +167,20 @@ def get_tags_for_entry(content):
                     suggested_title = value.strip()
                 # Extract other tags
                 elif dimension in ['emotion', 'topic', 'etc']:
-                    # Convert tag value to lowercase and normalize
-                    tag_value = normalize_tags(value.strip().lower())
-                    tags[dimension] = tag_value
+                    # Split tag value and visual element
+                    tag_parts = value.strip().split(' / ')
+                    tag_value = tag_parts[0].strip()
+                    visual_element = tag_parts[1].strip() if len(tag_parts) > 1 else None
+                    
+                    if dimension == 'emotion':
+                        tags['emotion'] = tag_value.lower()
+                        tags['emotion_visual'] = visual_element
+                    elif dimension == 'topic':
+                        tags['topic'] = tag_value
+                        tags['topic_visual'] = visual_element
+                    elif dimension == 'etc':
+                        tags['etc'] = tag_value
+                        tags['etc_visual'] = visual_element
         
         return tags, suggested_title
     except Exception as e:
@@ -376,7 +387,10 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         return
     
     # Write updated CSV with all fields
-    fieldnames = ['Date', 'Title', 'Section', 'Content', 'Time', 'emotion', 'topic', 'etc']
+    fieldnames = ['Date', 'Title', 'Section', 'Content', 'Time', 
+                 'emotion', 'emotion_visual', 
+                 'topic', 'topic_visual',
+                 'etc', 'etc_visual']
     with open(output_csv_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
