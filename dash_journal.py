@@ -297,7 +297,8 @@ def create_layout() -> dbc.Container:
             dbc.Col([
                 dcc.Graph(
                     id='timeline-graph',
-                    figure=state.create_timeline_figure(state.df) if state.df is not None else {}
+                    figure=state.create_timeline_figure(state.df) if state.df is not None else {},
+                    clickData=None  # Add clickData property
                 )
             ], width=12)
         ], className="mb-4"),
@@ -306,12 +307,24 @@ def create_layout() -> dbc.Container:
         dbc.Row([
             dbc.Col([
                 html.Label("Select Date Range:"),
-                dcc.DatePickerRange(
-                    id='date-picker',
-                    start_date=start_date,
-                    end_date=end_date,
-                    display_format='YYYY-MM-DD'
-                )
+                dbc.Row([
+                    dbc.Col([
+                        dcc.DatePickerRange(
+                            id='date-picker',
+                            start_date=start_date,
+                            end_date=end_date,
+                            display_format='YYYY-MM-DD'
+                        )
+                    ], width=10),
+                    dbc.Col([
+                        dbc.Button(
+                            "Reset Range",
+                            id="reset-range-button",
+                            color="secondary",
+                            className="ms-2"
+                        )
+                    ], width=2)
+                ])
             ], width=12)
         ], className="mb-4"),
         
@@ -378,17 +391,35 @@ app.layout = create_layout()
 
 @app.callback(
     [Output('journal-table', 'data'),
-     Output('timeline-graph', 'figure')],
-    Input('date-picker', 'start_date'),
-    Input('date-picker', 'end_date')
+     Output('timeline-graph', 'figure'),
+     Output('date-picker', 'start_date'),
+     Output('date-picker', 'end_date')],
+    [Input('date-picker', 'start_date'),
+     Input('date-picker', 'end_date'),
+     Input('timeline-graph', 'clickData'),
+     Input('reset-range-button', 'n_clicks')]
 )
-def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]) -> Tuple[list, dict]:
-    """Update both the table and timeline based on selected date range"""
+def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str], clickData: Optional[dict], reset_clicks: Optional[int]) -> Tuple[list, dict, str, str]:
+    """Update both the table and timeline based on selected date range or click event"""
     if state.df is None or state.df.empty:
-        return [], {}
+        return [], {}, None, None
     
-    # If no dates selected, use last 30 days
-    if not start_date or not end_date:
+    # Get the triggered input
+    ctx = dash.callback_context
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+    
+    # Handle reset button click
+    if triggered_id == 'reset-range-button':
+        end_date = state.df['Date'].max()
+        start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
+        end_date = (pd.to_datetime(end_date) + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
+    # Handle click event on timeline
+    elif clickData:
+        clicked_date = pd.to_datetime(clickData['points'][0]['x'])
+        start_date = (clicked_date - pd.Timedelta(days=2)).strftime('%Y-%m-%d')
+        end_date = clicked_date.strftime('%Y-%m-%d')
+    # If no dates selected and no click, use last 30 days
+    elif not start_date or not end_date:
         end_date = state.df['Date'].max()
         start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
         end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
@@ -398,7 +429,7 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
     mask &= state.df['Date'] <= end_date
     
     filtered_df = state.df[mask]
-    return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df)
+    return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date
 
 @app.callback(
     Output('status-indicator', 'children'),
