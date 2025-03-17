@@ -257,12 +257,16 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             entry['original_index'] = idx
             input_entries.append(entry)
     
+    print(f"\nFound {len(input_entries)} total entries in input file")
+    
     # Filter entries by date if specified
     if target_date:
         input_entries = [e for e in input_entries if e['Date'] == target_date]
-        print(f"\nFound {len(input_entries)} entries for date {target_date}")
-    else:
-        print(f"\nFound {len(input_entries)} total entries in input file")
+        print(f"After date filter: {len(input_entries)} entries for date {target_date}")
+    
+    # Create a set of unique identifiers from input entries
+    input_keys = {(e['Date'], e['Content']) for e in input_entries}
+    print(f"Number of unique entries in input file: {len(input_keys)}")
     
     # Handle existing annotated file - use input filename with _annotated suffix
     output_filename = input_path.stem
@@ -270,40 +274,34 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         output_filename += f'_{target_date}'
     output_filename += '_annotated.csv'
     output_csv_file = output_dir / output_filename
-    existing_entries = []
-    if output_csv_file.exists():
+    
+    # Create lookup of existing entries
+    existing_lookup = {}
+    if output_csv_file.exists() and not retag_all:  # Only use existing entries if not retagging all
         with open(output_csv_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             existing_entries = list(reader)
-        print(f"Found {len(existing_entries)} entries in annotated file\n")
-    
-    # Create lookup of existing entries by date+title+content (for entries with no title)
-    existing_lookup = {}
-    for e in existing_entries:
-        # Preserve original_index from input entries if available
-        if not e.get('original_index'):
-            for input_entry in input_entries:
-                if (input_entry['Date'] == e['Date'] and 
-                    input_entry['Title'] == e['Title'] and 
-                    input_entry['Content'] == e['Content']):
-                    e['original_index'] = input_entry['original_index']
-                    break
-        
-        # For entries with no title, use a combination of date and content
-        if not e['Title']:
-            key = (e['Date'], e['Content'][:100])  # Use first 100 chars of content as key
-        else:
-            key = (e['Date'], e['Title'])
-        existing_lookup[key] = e
+            print(f"Found {len(existing_entries)} entries in annotated file")
+            
+            # Check for duplicates in existing annotated file
+            existing_keys = set()
+            for e in existing_entries:
+                key = (e['Date'], e['Content'])
+                if key in existing_keys:
+                    print(f"Warning: Duplicate entry found in annotated file - Date: {e['Date']}, Title: {e['Title']}")
+                existing_keys.add(key)
+            print(f"Number of unique entries in annotated file: {len(existing_keys)}")
+            
+            # Create lookup using Date and Content as key
+            for e in existing_entries:
+                key = (e['Date'], e['Content'])
+                if key in input_keys:  # Only keep entries that exist in input file
+                    existing_lookup[key] = e
     
     # Identify entries needing processing
     entries_to_process = []
     for entry in input_entries:
-        # Create lookup key based on whether entry has a title
-        if not entry['Title']:
-            key = (entry['Date'], entry['Content'][:100])
-        else:
-            key = (entry['Date'], entry['Title'])
+        key = (entry['Date'], entry['Content'])
             
         if key not in existing_lookup:
             print(f"\nNew entry found: {entry['Date']} - {entry['Title'] or 'Untitled'}")
@@ -314,8 +312,8 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         elif not all(existing_lookup[key].get(field) for field in ['emotion', 'topic']):
             print(f"\nUntagged entry found: {entry['Date']} - {entry['Title'] or 'Untitled'}")
             entries_to_process.append(entry)
-        
-    print(f"\nFound {len(entries_to_process)} entries to process (new or untagged)\n")
+    
+    print(f"\nFound {len(entries_to_process)} entries to process\n")
     
     # Process entries
     for i, entry in enumerate(entries_to_process, 1):
@@ -344,26 +342,31 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             entry.update(tags)
             print(f"Adding tags: emotion={tags.get('emotion', '')}, topic={tags.get('topic', '')}, etc={tags.get('etc', '')}")
             
-            # Update lookup
-            if not entry['Title']:
-                key = (entry['Date'], entry['Content'][:100])
-            else:
-                key = (entry['Date'], entry['Title'])
+            # Update lookup using Date and Content as key
+            key = (entry['Date'], entry['Content'])
             existing_lookup[key] = entry
             
         except Exception as e:
             print(f"Error processing entry: {str(e)}")
             continue
     
-    # Combine all entries
-    entries = list(existing_lookup.values())
+    # Create final entries list from input entries to maintain order
+    final_entries = []
+    for entry in input_entries:
+        key = (entry['Date'], entry['Content'])
+        if key in existing_lookup:
+            final_entries.append(existing_lookup[key])
+        else:
+            final_entries.append(entry)
+    
+    print(f"\nFinal number of entries: {len(final_entries)}")
     
     # Sort entries by date and then by original_index
-    entries.sort(key=lambda x: (x['Date'], x.get('original_index', 999999)))
+    final_entries.sort(key=lambda x: (x['Date'], x.get('original_index', 999999)))
     
     if dry_run:
         print("\nDRY RUN - Would write the following entries:")
-        for entry in entries:
+        for entry in final_entries:
             if target_date and entry['Date'] == target_date:
                 print(f"\nDate: {entry['Date']}")
                 print(f"Title: {entry['Title']}")
@@ -378,7 +381,7 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         # Remove original_index before writing
-        for entry in entries:
+        for entry in final_entries:
             entry_copy = entry.copy()
             if 'original_index' in entry_copy:
                 del entry_copy['original_index']
