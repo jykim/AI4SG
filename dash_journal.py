@@ -127,8 +127,8 @@ class DashboardState:
             hover_text += f"#{row['emotion']} {row['Tags']}<br>"
             hover_text += f"Content: {content[:200]}..." if len(content) > 200 else f"Content: {content}"
             
-            # Get color from emotion_visual field, default to gray if not available
-            color = row.get('emotion_visual', '#808080')
+            # Get color from emotion_visual field using full DataFrame
+            color = get_emotion_color(df, row['emotion'], self.df)
             
             fig.add_trace(go.Scatter(
                 x=[row['Date']],
@@ -262,6 +262,25 @@ class DashboardState:
             logging.info("New entries detected, forcing dashboard refresh")
             self.update_event.set()
 
+def hex_to_rgba(hex_color: str, alpha: float = 0.3) -> str:
+    """Convert hex color to rgba format with specified alpha."""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f'rgba({r}, {g}, {b}, {alpha})'
+
+def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = None) -> str:
+    """Get the color for an emotion from GPT-4's emotion_visual field."""
+    if full_df is None:
+        full_df = df
+    if full_df is None or full_df.empty:
+        return '#808080'
+    emotion_rows = full_df[full_df['emotion'] == emotion]
+    if emotion_rows.empty:
+        return '#808080'
+    return emotion_rows['emotion_visual'].iloc[0]
+
 # Initialize global state
 state = DashboardState()
 state.df = state.load_data()
@@ -378,7 +397,7 @@ def create_layout() -> dbc.Container:
                                 'filter_query': f'{{emotion}} = "{emotion}"',
                                 'column_id': 'emotion'
                             },
-                            'backgroundColor': state.df[state.df['emotion'] == emotion]['emotion_visual'].iloc[0] if state.df is not None and not state.df[state.df['emotion'] == emotion].empty else '#808080'
+                            'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
                         }
                         for emotion in state.df['emotion'].unique() if state.df is not None
                     ]
