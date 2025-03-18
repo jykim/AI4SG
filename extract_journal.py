@@ -29,22 +29,22 @@ def extract_time_from_title(title):
     return None
 
 def extract_time_and_title_from_header(header):
-    """Extract time and title from a header line (format: ### 10am Title)"""
+    """Extract time and title from a header line (format: ### 10am Title or ### Title)"""
     if not header.startswith('### '):
         return None, None
         
     # Remove the ### prefix
     header = header[4:].strip()
     
-    # Extract time
+    # Extract time if present
     time = extract_time_from_title(header)
-    if not time:
-        return None, None
-        
-    # Extract title (everything after the time)
-    title = header[header.find(time) + len(time):].strip()
-    
-    return time, title
+    if time:
+        # Extract title (everything after the time)
+        title = header[header.find(time) + len(time):].strip()
+        return time, title
+    else:
+        # If no time found, use the entire header as title
+        return None, header
 
 def split_into_parts(content):
     """Split content into parts using h3 headers or horizontal lines"""

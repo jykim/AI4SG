@@ -280,20 +280,20 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
     if full_df is None:
         full_df = df
     if full_df is None or full_df.empty:
-        return '#808080'
+        return '#FFFFFF'
     if not emotion or str(emotion).lower() == 'blank':  # Handle empty emotion or 'blank'
-        return '#808080'
+        return '#FFFFFF'
     emotion_rows = full_df[full_df['emotion'] == emotion]
     if emotion_rows.empty:
-        return '#808080'
+        return '#FFFFFF'
     color = emotion_rows['emotion_visual'].iloc[0]
     # Handle NaN or invalid color values
     if pd.isna(color) or not str(color).strip():
-        return '#808080'
+        return '#FFFFFF'
     # Convert color to string and ensure it's valid
     color_str = str(color).strip()
     if color_str.lower() == 'blank' or not color_str.startswith('#'):
-        return '#808080'
+        return '#FFFFFF'
     return color_str
 
 # Initialize global state
@@ -317,12 +317,31 @@ def create_layout() -> dbc.Container:
         end_date = None
 
     return dbc.Container([
-        # Status indicator
+        # Header row with title and controls
         dbc.Row([
             dbc.Col([
-                html.Div(id='status-indicator', className="text-center mb-3")
-            ], width=12)
-        ]),
+                html.H1("Journaling with AI", className="mb-0")
+            ], width=6, className="d-flex align-items-center"),
+            dbc.Col([
+                dbc.Row([
+                    dbc.Col([
+                        html.Label("Date Range:", className="me-2"),
+                        dcc.DatePickerRange(
+                            id='date-picker',
+                            start_date=start_date,
+                            end_date=end_date,
+                            display_format='YYYY-MM-DD'
+                        ),
+                        dbc.Button(
+                            "Reset",
+                            id="reset-range-button",
+                            color="secondary",
+                            className="ms-2"
+                        )
+                    ], className="d-flex align-items-center justify-content-end")
+                ])
+            ], width=6)
+        ], className="mb-4"),
         
         # Timeline visualization
         dbc.Row([
@@ -332,31 +351,6 @@ def create_layout() -> dbc.Container:
                     figure=state.create_timeline_figure(state.df) if state.df is not None else {},
                     clickData=None  # Add clickData property
                 )
-            ], width=12)
-        ], className="mb-4"),
-        
-        # Date range picker
-        dbc.Row([
-            dbc.Col([
-                html.Label("Select Date Range:"),
-                dbc.Row([
-                    dbc.Col([
-                        dcc.DatePickerRange(
-                            id='date-picker',
-                            start_date=start_date,
-                            end_date=end_date,
-                            display_format='YYYY-MM-DD'
-                        )
-                    ], width=10),
-                    dbc.Col([
-                        dbc.Button(
-                            "Reset Range",
-                            id="reset-range-button",
-                            color="secondary",
-                            className="ms-2"
-                        )
-                    ], width=2)
-                ])
             ], width=12)
         ], className="mb-4"),
         
@@ -475,16 +469,6 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
         filtered_df[col] = filtered_df[col].replace(['blank', '/', 'blank /', 'neutral', ''], '')
     
     return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date
-
-@app.callback(
-    Output('status-indicator', 'children'),
-    Input('journal-table', 'data')
-)
-def update_status(data: list) -> str:
-    """Update the status indicator"""
-    if not data:
-        return "No entries found for the selected date range."
-    return f"Showing {len(data)} entries"
 
 def handle_sigtstp(signum: int, frame: Any) -> None:
     """Handle Ctrl+Z (SIGTSTP) signal"""
