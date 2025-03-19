@@ -5,10 +5,13 @@ import dash_bootstrap_components as dbc
 from dash_journal import (
     Config as BaseConfig,
     DashboardState,
-    create_layout
+    create_layout,
+    update_table_and_timeline,
+    state as global_state
 )
 from datetime import datetime
 import pandas as pd
+from dash import Input, Output, html
 
 # Configure basic logging first
 logging.basicConfig(
@@ -50,23 +53,48 @@ def set_test_date(df: pd.DataFrame) -> None:
         pd.Timestamp.now = lambda: latest_date
         logging.info(f"Set test date to: {latest_date.strftime('%Y-%m-%d')}")
 
+def create_demo_layout(state):
+    """Create the demo dashboard layout"""
+    layout = create_layout(state)
+    # Replace the title with the demo version
+    layout.children[0].children[0].children[0] = html.H1("Journaling with AI (demo)", className="mb-0")
+    return layout
+
 def main():
     # Initialize test configuration
     config = TestConfig()
     
     # Create a new Dash app instance for testing
     app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+    app.title = "Journal Dashboard (demo)"
     
     # Initialize dashboard state with test config
-    state = DashboardState(config=config)
-    state.df = state.load_data()
-    if state.df is not None:
-        state.last_entries_count = len(state.df)
-        # Set today's date to match the latest date in test data
-        set_test_date(state.df)
+    global_state.config = config
+    global_state.df = global_state.load_data()
     
-    # Update app layout with test data
-    app.layout = create_layout(state)
+    if global_state.df is not None:
+        global_state.last_entries_count = len(global_state.df)
+        # Set today's date to match the latest date in test data
+        set_test_date(global_state.df)
+        logging.info(f"Loaded {len(global_state.df)} entries")
+        
+        # Initialize the app with the processed data
+        app.layout = create_demo_layout(global_state)
+        
+        # Register the callback from dash_journal.py
+        app.callback(
+            [Output('journal-table', 'data'),
+             Output('timeline-graph', 'figure'),
+             Output('date-picker', 'start_date'),
+             Output('date-picker', 'end_date'),
+             Output('emoji-filter', 'options')],
+            [Input('date-picker', 'start_date'),
+             Input('date-picker', 'end_date'),
+             Input('timeline-graph', 'clickData'),
+             Input('reset-range-button', 'n_clicks'),
+             Input('search-input', 'value'),
+             Input('emoji-filter', 'value')]
+        )(update_table_and_timeline)
     
     # Run the dashboard on port 8049
     app.run_server(debug=True, port=8049)
