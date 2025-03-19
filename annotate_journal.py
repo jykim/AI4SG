@@ -27,13 +27,61 @@ from pathlib import Path
 import pandas as pd
 import hashlib
 import json
+import yaml
+import logging
+
+class Config:
+    """Configuration class to manage application settings"""
+    def __init__(self, config_path: str = "config.yaml"):
+        self.config_path = config_path
+        self.load_config()
+        self.setup_directories()
+
+    def load_config(self) -> None:
+        """Load configuration from YAML file"""
+        try:
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            logging.warning(f"Config file {self.config_path} not found. Using default values.")
+            config = {
+                'input_dir': 'input',
+                'output_dir': 'output',
+                'api_cache_dir': 'api_cache',
+                'min_process_interval': 600
+            }
+        
+        # Set configuration values
+        self.input_dir = Path(config.get('input_dir', 'input'))
+        self.output_dir = Path(config.get('output_dir', 'output'))
+        self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
+        self.min_process_interval = config.get('min_process_interval', 600)
+        
+        # API key should be set via environment variable
+        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
+        if not self.openai_api_key:
+            logging.warning("No OpenAI API key found in environment variables")
+
+    def setup_directories(self) -> None:
+        """Create necessary directories if they don't exist"""
+        for directory in [self.input_dir, self.output_dir, self.api_cache_dir]:
+            directory.mkdir(exist_ok=True)
+
+# Initialize configuration
+config = Config()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config.output_dir / 'annotate.log'),
+        logging.StreamHandler()
+    ]
+)
 
 # OpenAI API configuration
-openai.api_key = "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"
-
-# Cache configuration
-CACHE_DIR = Path('api_cache')
-CACHE_DIR.mkdir(exist_ok=True)
+openai.api_key = config.openai_api_key
 
 def get_cache_key(content: str) -> str:
     """
@@ -57,13 +105,13 @@ def get_cached_response(cache_key: str) -> dict:
     Returns:
         dict: The cached response if found, None otherwise
     """
-    cache_file = CACHE_DIR / f"{cache_key}.json"
+    cache_file = config.api_cache_dir / f"{cache_key}.json"
     if cache_file.exists():
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error reading cache file: {e}")
+            logging.error(f"Error reading cache file: {e}")
     return None
 
 def save_to_cache(cache_key: str, response: dict) -> None:
@@ -74,12 +122,12 @@ def save_to_cache(cache_key: str, response: dict) -> None:
         cache_key (str): The cache key to save under
         response (dict): The response to cache including prompt and content
     """
-    cache_file = CACHE_DIR / f"{cache_key}.json"
+    cache_file = config.api_cache_dir / f"{cache_key}.json"
     try:
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(response, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Error saving to cache: {e}")
+        logging.error(f"Error saving to cache: {e}")
 
 def load_prompt_template():
     """
@@ -248,16 +296,12 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         target_date (str): Optional date to process (format: YYYY-MM-DD)
         dry_run (bool): If True, prints results without writing to file
     """
-    # Get output directory from environment variable or use default
-    output_dir = Path(os.environ.get('OUTPUT_DIR', 'output'))
-    output_dir.mkdir(exist_ok=True)
-    
     # Convert input path to Path object
     input_path = Path(input_csv_file)
     if not input_path.is_absolute():
         # If relative path doesn't exist in current directory, try in output directory
-        if not input_path.exists() and (output_dir / input_path.name).exists():
-            input_path = output_dir / input_path.name
+        if not input_path.exists() and (config.output_dir / input_path.name).exists():
+            input_path = config.output_dir / input_path.name
     
     # Read input CSV first
     input_entries = []
@@ -268,12 +312,12 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             entry['original_index'] = idx
             input_entries.append(entry)
     
-    print(f"\nFound {len(input_entries)} total entries in input file")
+    logging.info(f"\nFound {len(input_entries)} total entries in input file")
     
     # Filter entries by date if specified
     if target_date:
         input_entries = [e for e in input_entries if e['Date'] == target_date]
-        print(f"After date filter: {len(input_entries)} entries for date {target_date}")
+        logging.info(f"After date filter: {len(input_entries)} entries for date {target_date}")
     
     # Create a set of unique identifiers from input entries
     # For entries with empty content, use Title and original_index as part of the key
@@ -284,14 +328,14 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         else:
             key = (e['Date'], e.get('Content', ''))
         input_keys.add(key)
-    print(f"Number of unique entries in input file: {len(input_keys)}")
+    logging.info(f"Number of unique entries in input file: {len(input_keys)}")
     
     # Handle existing annotated file - use input filename with _annotated suffix
     output_filename = input_path.stem
     if target_date:
         output_filename += f'_{target_date}'
     output_filename += '_annotated.csv'
-    output_csv_file = output_dir / output_filename
+    output_csv_file = config.output_dir / output_filename
     
     # Create lookup of existing entries
     existing_lookup = {}
@@ -299,7 +343,7 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         with open(output_csv_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             existing_entries = list(reader)
-            print(f"Found {len(existing_entries)} entries in annotated file")
+            logging.info(f"Found {len(existing_entries)} entries in annotated file")
             
             # Check for duplicates in existing annotated file
             existing_keys = set()
@@ -309,9 +353,9 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
                 else:
                     key = (e['Date'], e.get('Content', ''))
                 if key in existing_keys:
-                    print(f"Warning: Duplicate entry found in annotated file - Date: {e['Date']}, Title: {e['Title']}")
+                    logging.warning(f"Warning: Duplicate entry found in annotated file - Date: {e['Date']}, Title: {e['Title']}")
                 existing_keys.add(key)
-            print(f"Number of unique entries in annotated file: {len(existing_keys)}")
+            logging.info(f"Number of unique entries in annotated file: {len(existing_keys)}")
             
             # Create lookup using Date and Content/Title as key
             for e in existing_entries:

@@ -1,112 +1,121 @@
-# Journal Entry Tagger
+# AI4G - AI-Powered Journal Analysis
 
-A Python tool that processes journal entries and adds semantic tags using OpenAI's GPT-4. The tool analyzes journal entries and adds structured tags for emotions, topics, and additional context, along with visual elements (colors and emojis) for better visualization.
+A dashboard application that processes and visualizes journal entries with AI-powered semantic analysis. The system extracts entries from markdown files, adds semantic tags using GPT-4, and provides an interactive dashboard for exploration.
 
 ## Features
 
-- **Semantic Tagging**: Automatically adds three types of tags to each entry:
-  - `emotion`: The emotional state expressed in the entry (with color)
-  - `topic`: Main topics or themes discussed (with emoji)
-  - `etc`: Additional contextual information (with emoji)
+- **Journal Entry Extraction**: Processes markdown files from Obsidian or similar note-taking apps
+- **Semantic Analysis**: Uses GPT-4 to add emotion, topic, and contextual tags to entries
+- **Interactive Dashboard**: Visualizes entries with timeline and detailed table views
+- **Real-time Updates**: Automatically detects and processes new entries
+- **Search & Filter**: Find entries by date, content, or tags
+- **API Caching**: Optimizes API usage by caching GPT-4 responses
 
-- **Visual Elements**: Each tag includes a visual element:
-  - Emotions have associated colors (e.g., "happy / #FFD700")
-  - Topics have associated emojis (e.g., "travel / ✈️")
-  - Additional tags have associated emojis (e.g., "family / 👨‍👩‍👧‍👦")
+## Prerequisites
 
-- **Smart Processing**:
-  - Processes only new or untagged entries by default
-  - Option to retag all entries
-  - Maintains original entries in input file
-  - Creates/updates an annotated version with tags
-  - Supports incremental updates
-
-- **Caching**: Uses a local cache to avoid duplicate API calls for the same content
+- Python 3.8 or higher
+- OpenAI API key
+- Obsidian or similar markdown-based note-taking app
 
 ## Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/journal-entry-tagger.git
-cd journal-entry-tagger
+git clone https://github.com/yourusername/AI4G.git
+cd AI4G
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
+2. Install required packages:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Set up your OpenAI API key:
+3. Set up your OpenAI API key:
 ```bash
-export OPENAI_API_KEY='your-api-key-here'
+export OPENAI_API_KEY=your_api_key_here
 ```
+
+4. Configure the application:
+   - Copy `config.yaml.example` to `config.yaml`
+   - Update the paths in `config.yaml` to match your system:
+     ```yaml
+     input_dir: "input"  # Directory for raw journal files
+     output_dir: "output"  # Directory for processed files
+     api_cache_dir: "api_cache"  # Directory for API response cache
+     journal_dir: "~/path/to/your/journal"  # Your journal directory
+     ```
 
 ## Usage
 
-### Basic Usage
+### Running the Dashboard
 
-Process new or untagged entries:
+Start the dashboard application:
+```bash
+python dash_journal.py
+```
+
+The dashboard will be available at http://127.0.0.1:8050/
+
+### Manual Processing
+
+1. Extract journal entries:
+```bash
+python extract_journal.py
+```
+
+2. Annotate entries with semantic tags:
 ```bash
 python annotate_journal.py --input journal_entries.csv
 ```
 
-### Command Line Options
+### Dashboard Features
 
-- `--input`: Input CSV file path (default: journal_entries.csv)
-- `--retag-all`: Re-tag all entries, not just untagged ones
-- `--date`: Process entries for specific date (format: YYYY-MM-DD)
-- `--dry-run`: Print results without writing to file
+- **Timeline View**: Visual representation of entries over time
+- **Data Table**: Detailed view of all entries with tags
+- **Search**: Find entries by content or tags
+- **Date Range**: Filter entries by date
+- **Auto-Update**: Dashboard refreshes automatically when new entries are found
+- **Manual Refresh**: Press Ctrl+Z to force a refresh of entries
 
-### Input CSV Format
+## Configuration
 
-The input CSV should have the following columns:
-- `Date`: Entry date (YYYY-MM-DD)
-- `Title`: Entry title (optional)
-- `Section`: Section name (optional)
-- `Content`: Entry content
-- `Time`: Entry time (optional)
+The application is configured through `config.yaml`:
 
-### Output Format
+```yaml
+# Directory Settings
+input_dir: "input"  # Directory containing raw journal files
+output_dir: "output"  # Directory for processed files
+api_cache_dir: "api_cache"  # Directory for caching API responses
+journal_dir: "~/path/to/your/journal"  # Your journal directory
 
-The script creates an annotated CSV file with the following additional columns:
-- `emotion`: Emotional state (e.g., "happy")
-- `emotion_visual`: Color code (e.g., "#FFD700")
-- `topic`: Main topic (e.g., "travel")
-- `topic_emoji`: Associated emoji (e.g., "✈️")
-- `etc`: Additional context (e.g., "family")
-- `etc_emoji`: Associated emoji (e.g., "👨‍👩‍👧‍👦")
+# API Settings
+openai_api_key: ""  # Set via environment variable
+
+# Processing Settings
+min_process_interval: 600  # Minimum seconds between processing runs
+```
 
 ## Project Structure
 
 ```
-journal-entry-tagger/
-├── annotate_journal.py    # Main script for processing entries
-├── tagging_prompt.md      # GPT-4 prompt template
-├── requirements.txt       # Python dependencies
-├── api_cache/            # Cache directory for API responses
-└── output/               # Directory for annotated CSV files
+AI4G/
+├── config.yaml           # Configuration file
+├── dash_journal.py       # Dashboard application
+├── extract_journal.py    # Journal entry extraction
+├── annotate_journal.py   # Semantic analysis
+├── tagging_prompt.md     # GPT-4 prompt template
+├── input/               # Raw journal files
+├── output/              # Processed files
+└── api_cache/           # Cached API responses
 ```
-
-## Dependencies
-
-- Python 3.8+
-- OpenAI API
-- pandas
-- dash (for visualization)
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 

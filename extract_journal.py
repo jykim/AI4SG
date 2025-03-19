@@ -3,6 +3,53 @@ import re
 import csv
 from datetime import datetime
 from pathlib import Path
+import yaml
+import logging
+
+class Config:
+    """Configuration class to manage application settings"""
+    def __init__(self, config_path: str = "config.yaml"):
+        self.config_path = config_path
+        self.load_config()
+        self.setup_directories()
+
+    def load_config(self) -> None:
+        """Load configuration from YAML file"""
+        try:
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            logging.warning(f"Config file {self.config_path} not found. Using default values.")
+            config = {
+                'input_dir': 'input',
+                'output_dir': 'output',
+                'api_cache_dir': 'api_cache',
+                'journal_dir': '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal'
+            }
+        
+        # Set configuration values
+        self.input_dir = Path(config.get('input_dir', 'input'))
+        self.output_dir = Path(config.get('output_dir', 'output'))
+        self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
+        self.journal_dir = Path(os.path.expanduser(config.get('journal_dir', '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal')))
+
+    def setup_directories(self) -> None:
+        """Create necessary directories if they don't exist"""
+        for directory in [self.input_dir, self.output_dir, self.api_cache_dir]:
+            directory.mkdir(exist_ok=True)
+
+# Initialize configuration
+config = Config()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config.output_dir / 'extract.log'),
+        logging.StreamHandler()
+    ]
+)
 
 def extract_date_and_title_from_filename(filename):
     """Extract date and title from filename (assuming format like YYYY-MM-DD-title.md)"""
@@ -169,21 +216,14 @@ def process_markdown_file(file_path):
     return entries
 
 def main():
-    # Get output directory from environment variable or use default
-    output_dir = Path(os.environ.get('OUTPUT_DIR', 'output'))
-    output_dir.mkdir(exist_ok=True)
-    
-    # Journal directory path
-    journal_dir = Path('/Users/lifidea/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal')
-    
     # Output files
-    output_md = output_dir / 'journal_entries.md'
-    output_csv = output_dir / 'journal_entries.csv'
+    output_md = config.output_dir / 'journal_entries.md'
+    output_csv = config.output_dir / 'journal_entries.csv'
     
     all_entries = []
     
     # Process all markdown files in the directory
-    for file_path in journal_dir.glob('*.md'):
+    for file_path in config.journal_dir.glob('*.md'):
         entries = process_markdown_file(file_path)
         all_entries.extend(entries)
     
@@ -206,8 +246,8 @@ def main():
         for date, title, section_title, content, time in all_entries:
             writer.writerow([date, title, section_title, content, time])
     
-    print(f"Processed {len(all_entries)} entries from journal files")
-    print(f"Results saved to {output_md} and {output_csv}")
+    logging.info(f"Processed {len(all_entries)} entries from journal files")
+    logging.info(f"Results saved to {output_md} and {output_csv}")
 
 if __name__ == '__main__':
     main()

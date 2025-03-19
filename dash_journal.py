@@ -16,18 +16,51 @@ from pathlib import Path
 import os
 from typing import Optional, Tuple, Dict, Any
 
-# Constants
-OUTPUT_DIR = Path('output')
-OUTPUT_DIR.mkdir(exist_ok=True)
+class Config:
+    """Configuration class to manage application settings"""
+    def __init__(self, config_path: str = "config.yaml"):
+        self.config_path = config_path
+        self.load_config()
+        self.setup_directories()
+
+    def load_config(self) -> None:
+        """Load configuration from YAML file"""
+        try:
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            logging.warning(f"Config file {self.config_path} not found. Using default values.")
+            config = {
+                'input_dir': 'input',
+                'output_dir': 'output',
+                'api_cache_dir': 'api_cache',
+                'min_process_interval': 600
+            }
+        
+        # Set configuration values
+        self.input_dir = Path(config.get('input_dir', 'input'))
+        self.output_dir = Path(config.get('output_dir', 'output'))
+        self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
+        self.min_process_interval = config.get('min_process_interval', 600)
+        
+        # API key should be set via environment variable
+        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
+
+    def setup_directories(self) -> None:
+        """Create necessary directories if they don't exist"""
+        for directory in [self.input_dir, self.output_dir, self.api_cache_dir]:
+            directory.mkdir(exist_ok=True)
+
+# Initialize configuration
+config = Config()
 SCRIPT_DIR = Path(__file__).parent.absolute()
-MIN_PROCESS_INTERVAL = 600  # Minimum seconds between processing runs (10 minutes)
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(OUTPUT_DIR / 'dashboard.log'),
+        logging.FileHandler(config.output_dir / 'dashboard.log'),
         logging.StreamHandler()
     ]
 )
@@ -48,7 +81,7 @@ class DashboardState:
         """Load and process the journal data"""
         try:
             # Use journal_entries_annotated.csv as the base file
-            df = pd.read_csv(OUTPUT_DIR / 'journal_entries_annotated.csv')
+            df = pd.read_csv(config.output_dir / 'journal_entries_annotated.csv')
             
             # Clean up and parse dates, dropping any rows with invalid dates
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
@@ -185,7 +218,7 @@ class DashboardState:
                 logging.debug("Processing already in progress, skipping...")
                 return False
             # Only check time interval if not forced
-            if not force and current_time - self.last_process_time < MIN_PROCESS_INTERVAL:
+            if not force and current_time - self.last_process_time < config.min_process_interval:
                 logging.debug("Skipping processing - too soon since last run")
                 return False
             self.is_processing = True
@@ -194,7 +227,11 @@ class DashboardState:
 
         try:
             env = os.environ.copy()
-            env['OUTPUT_DIR'] = str(OUTPUT_DIR)
+            env['OUTPUT_DIR'] = str(config.output_dir)
+            env['INPUT_DIR'] = str(config.input_dir)
+            env['API_CACHE_DIR'] = str(config.api_cache_dir)
+            if config.openai_api_key:
+                env['OPENAI_API_KEY'] = config.openai_api_key
 
             # Run extraction
             logging.info("Starting journal extraction and annotation process...")
@@ -581,7 +618,7 @@ def background_processor(retag_all: bool = False) -> None:
     while True:
         current_time = time.time()
         # Only run if enough time has passed since last run
-        if current_time - state.last_process_time >= MIN_PROCESS_INTERVAL:
+        if current_time - state.last_process_time >= config.min_process_interval:
             state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
         # Check for content changes every 5 seconds
         new_df = state.load_data()
