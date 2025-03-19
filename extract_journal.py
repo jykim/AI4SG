@@ -215,7 +215,11 @@ def process_markdown_file(file_path):
     
     return entries
 
-def main():
+def main(config=None):
+    # Use provided config or global config
+    if config is None:
+        config = Config()
+    
     # Output files
     output_md = config.output_dir / 'journal_entries.md'
     output_csv = config.output_dir / 'journal_entries.csv'

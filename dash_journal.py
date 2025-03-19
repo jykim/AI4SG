@@ -67,7 +67,7 @@ logging.basicConfig(
 
 class DashboardState:
     """Manages the global state of the dashboard"""
-    def __init__(self):
+    def __init__(self, config: Optional[Config] = None):
         self.is_processing = False
         self.df: Optional[pd.DataFrame] = None
         self.last_entries_count = 0
@@ -76,12 +76,13 @@ class DashboardState:
         self.processing_lock = threading.Lock()
         self.processing_requested = False
         self.last_content_hash = None  # Track content changes
+        self.config = config or Config()  # Use provided config or create new one
 
     def load_data(self) -> Optional[pd.DataFrame]:
         """Load and process the journal data"""
         try:
             # Use journal_entries_annotated.csv as the base file
-            df = pd.read_csv(config.output_dir / 'journal_entries_annotated.csv')
+            df = pd.read_csv(self.config.output_dir / 'journal_entries_annotated.csv')
             
             # Clean up and parse dates, dropping any rows with invalid dates
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
@@ -218,7 +219,7 @@ class DashboardState:
                 logging.debug("Processing already in progress, skipping...")
                 return False
             # Only check time interval if not forced
-            if not force and current_time - self.last_process_time < config.min_process_interval:
+            if not force and current_time - self.last_process_time < self.config.min_process_interval:
                 logging.debug("Skipping processing - too soon since last run")
                 return False
             self.is_processing = True
@@ -227,11 +228,11 @@ class DashboardState:
 
         try:
             env = os.environ.copy()
-            env['OUTPUT_DIR'] = str(config.output_dir)
-            env['INPUT_DIR'] = str(config.input_dir)
-            env['API_CACHE_DIR'] = str(config.api_cache_dir)
-            if config.openai_api_key:
-                env['OPENAI_API_KEY'] = config.openai_api_key
+            env['OUTPUT_DIR'] = str(self.config.output_dir)
+            env['INPUT_DIR'] = str(self.config.input_dir)
+            env['API_CACHE_DIR'] = str(self.config.api_cache_dir)
+            if self.config.openai_api_key:
+                env['OPENAI_API_KEY'] = self.config.openai_api_key
 
             # Run extraction
             logging.info("Starting journal extraction and annotation process...")
@@ -339,17 +340,11 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
         return '#FFFFFF'
     return color_str
 
-# Initialize global state
-state = DashboardState()
-state.df = state.load_data()
-if state.df is not None:
-    state.last_entries_count = len(state.df)
-
-# Initialize Dash app
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-
-def create_layout() -> dbc.Container:
+def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
     """Create the dashboard layout"""
+    if state is None:
+        state = DashboardState()
+    
     # Calculate default date range (past 14 days + future 7 days)
     if state.df is not None and not state.df.empty:
         today = pd.Timestamp.now().normalize()
@@ -492,7 +487,15 @@ def create_layout() -> dbc.Container:
         ])
     ])
 
-app.layout = create_layout()
+# Initialize global state
+state = DashboardState()
+state.df = state.load_data()
+if state.df is not None:
+    state.last_entries_count = len(state.df)
+
+# Initialize Dash app
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app.layout = create_layout(state)
 
 @app.callback(
     [Output('journal-table', 'data'),

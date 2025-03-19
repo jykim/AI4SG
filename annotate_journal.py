@@ -95,16 +95,19 @@ def get_cache_key(content: str) -> str:
     """
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-def get_cached_response(cache_key: str) -> dict:
+def get_cached_response(cache_key: str, config=None) -> dict:
     """
     Try to get a cached response for the given key.
     
     Args:
         cache_key (str): The cache key to look up
+        config: Optional Config object to use instead of global config
         
     Returns:
         dict: The cached response if found, None otherwise
     """
+    if config is None:
+        config = Config()
     cache_file = config.api_cache_dir / f"{cache_key}.json"
     if cache_file.exists():
         try:
@@ -114,14 +117,17 @@ def get_cached_response(cache_key: str) -> dict:
             logging.error(f"Error reading cache file: {e}")
     return None
 
-def save_to_cache(cache_key: str, response: dict) -> None:
+def save_to_cache(cache_key: str, response: dict, config=None) -> None:
     """
     Save an API response to the cache.
     
     Args:
         cache_key (str): The cache key to save under
         response (dict): The response to cache including prompt and content
+        config: Optional Config object to use instead of global config
     """
+    if config is None:
+        config = Config()
     cache_file = config.api_cache_dir / f"{cache_key}.json"
     try:
         with open(cache_file, 'w', encoding='utf-8') as f:
@@ -142,22 +148,21 @@ def load_prompt_template():
     with open('tagging_prompt.md', 'r', encoding='utf-8') as f:
         return f.read()
 
-def get_tags_for_entry(content):
+def get_tags_for_entry(content, config=None):
     """
     Get semantic tags for a journal entry using OpenAI's GPT-4 API.
     Uses caching to avoid duplicate API calls.
     
     Args:
         content (str): The journal entry content to analyze
+        config: Optional Config object to use instead of global config
         
     Returns:
         tuple: (tags dict, suggested_title)
-        
-    Note:
-        - Content is truncated if it exceeds token limits
-        - Returns empty dict if API call fails
-        - Uses cached response if available
     """
+    if config is None:
+        config = Config()
+    
     # Truncate content if too long (to avoid token limit)
     max_chars = 2000
     if len(content) > max_chars:
@@ -166,7 +171,7 @@ def get_tags_for_entry(content):
     try:
         # Check cache first
         cache_key = get_cache_key(content)
-        cached_response = get_cached_response(cache_key)
+        cached_response = get_cached_response(cache_key, config)
         
         if cached_response:
             print("Using cached response...")
@@ -197,7 +202,7 @@ def get_tags_for_entry(content):
                 'content': tags_text,
                 'prompt': prompt,
                 'timestamp': pd.Timestamp.now().isoformat()
-            })
+            }, config)
         
         print(f"\nAPI Response:\n{tags_text}")
         
@@ -286,7 +291,7 @@ def is_entry_untagged(entry):
     
     return is_untagged
 
-def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_run=False):
+def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_run=False, config=None):
     """
     Process journal entries and add semantic tags.
     
@@ -295,7 +300,11 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         retag_all (bool): Whether to retag all entries or just new/untagged ones
         target_date (str): Optional date to process (format: YYYY-MM-DD)
         dry_run (bool): If True, prints results without writing to file
+        config: Optional Config object to use instead of global config
     """
+    if config is None:
+        config = Config()
+    
     # Convert input path to Path object
     input_path = Path(input_csv_file)
     if not input_path.is_absolute():
@@ -400,7 +409,7 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
         
         try:
             # Get tags from GPT
-            tags, suggested_title = get_tags_for_entry(content)
+            tags, suggested_title = get_tags_for_entry(content, config)
             if not tags:
                 print(f"Warning: No tags returned for entry: {entry['Date']} - {entry['Title'] or 'Untitled'}")
                 continue
@@ -469,8 +478,11 @@ def update_csv_with_tags(input_csv_file, retag_all=False, target_date=None, dry_
             writer.writerow(entry_copy)
     print(f"\nCreated/Updated annotated CSV file: {output_csv_file}")
 
-def main():
+def main(config=None):
     """Main entry point with argument parsing."""
+    if config is None:
+        config = Config()
+    
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -486,7 +498,7 @@ def main():
     args = parser.parse_args()
     
     print("Starting CSV processing...")
-    update_csv_with_tags(args.input, args.retag_all, args.date, args.dry_run)
+    update_csv_with_tags(args.input, args.retag_all, args.date, args.dry_run, config)
     print("\nAnnotation complete!")
 
 if __name__ == '__main__':
