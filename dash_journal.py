@@ -340,6 +340,14 @@ def create_layout() -> dbc.Container:
                     placeholder='Search in content...',
                     className="form-control",
                     style={'width': '300px'}
+                ),
+                html.Label("Tags:", className="ms-4 me-3", style={'fontSize': '18px'}),
+                dcc.Dropdown(
+                    id='emoji-filter',
+                    options=[],  # Will be populated in callback
+                    placeholder='Select tag...',
+                    style={'width': '200px'},
+                    clearable=True
                 )
             ], width=6, className="d-flex align-items-center"),
             dbc.Col([
@@ -453,17 +461,66 @@ app.layout = create_layout()
     [Output('journal-table', 'data'),
      Output('timeline-graph', 'figure'),
      Output('date-picker', 'start_date'),
-     Output('date-picker', 'end_date')],
+     Output('date-picker', 'end_date'),
+     Output('emoji-filter', 'options')],
     [Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date'),
      Input('timeline-graph', 'clickData'),
      Input('reset-range-button', 'n_clicks'),
-     Input('search-input', 'value')]
+     Input('search-input', 'value'),
+     Input('emoji-filter', 'value')]
 )
-def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str], clickData: Optional[dict], reset_clicks: Optional[int], search_text: Optional[str]) -> Tuple[list, dict, str, str]:
-    """Update both the table and timeline based on selected date range, click event, or search text"""
+def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str], 
+                            clickData: Optional[dict], reset_clicks: Optional[int], 
+                            search_text: Optional[str], selected_emoji: Optional[str]) -> Tuple[list, dict, str, str, list]:
+    """Update both the table and timeline based on selected date range, click event, search text, or emoji filter"""
     if state.df is None or state.df.empty:
-        return [], {}, None, None
+        return [], {}, None, None, []
+    
+    # Get unique emojis and their descriptions from Tags and Tags_Tooltip
+    emoji_counts = {}
+    emoji_descriptions = {}
+    
+    # Create a mapping to store unique emoji-description pairs
+    emoji_desc_mapping = {}
+    
+    # First pass: collect all unique emoji-description pairs
+    for tags, tooltips in zip(state.df['Tags'].dropna(), state.df['Tags_Tooltip'].dropna()):
+        tag_list = tags.split()
+        tooltip_list = tooltips.split()
+        
+        for tag, tooltip in zip(tag_list, tooltip_list):
+            tag = tag.strip()
+            if tag and not pd.isna(tag):
+                desc_start = tooltip.find("(")
+                desc_end = tooltip.find(")")
+                if desc_start != -1 and desc_end != -1:
+                    desc = tooltip[desc_start + 1:desc_end].strip()
+                    # Store the emoji-description pair
+                    if tag not in emoji_desc_mapping:
+                        emoji_desc_mapping[tag] = desc
+    
+    # Second pass: count frequencies using consistent descriptions
+    for tags in state.df['Tags'].dropna():
+        tag_list = tags.split()
+        for tag in tag_list:
+            tag = tag.strip()
+            if tag and not pd.isna(tag):
+                # Use the consistent description from the mapping
+                desc = emoji_desc_mapping.get(tag, '')
+                # Create a unique key that combines emoji and description
+                emoji_key = tag
+                emoji_counts[emoji_key] = emoji_counts.get(emoji_key, 0) + 1
+                emoji_descriptions[emoji_key] = desc
+    
+    # Get top 10 most frequent emojis
+    top_emojis = sorted(emoji_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    # Create options with emoji and description
+    emoji_options = [
+        {'label': f"{emoji} {emoji_descriptions[emoji]} ({count})", 'value': emoji}
+        for emoji, count in top_emojis
+    ]
     
     # Get the triggered input
     ctx = dash.callback_context
@@ -503,11 +560,16 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
         )
         filtered_df = filtered_df[search_mask]
     
+    # Apply emoji filter if selected
+    if selected_emoji:
+        emoji_mask = filtered_df['Tags'].str.contains(selected_emoji, na=False)
+        filtered_df = filtered_df[emoji_mask]
+    
     # Replace 'blank', '/', 'blank /', 'neutral', and empty values with empty string for display
     for col in ['emotion', 'topic', 'etc']:
         filtered_df[col] = filtered_df[col].replace(['blank', '/', 'blank /', 'neutral', ''], '')
     
-    return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date
+    return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date, emoji_options
 
 def handle_sigtstp(signum: int, frame: Any) -> None:
     """Handle Ctrl+Z (SIGTSTP) signal"""
