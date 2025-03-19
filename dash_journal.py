@@ -135,6 +135,9 @@ class DashboardState:
             # Get color from emotion_visual field using full DataFrame
             color = get_emotion_color(df, row['emotion'], self.df)
             
+            # Check if this is today's entry
+            is_today = row['Date'].date() == pd.Timestamp.now().date()
+            
             fig.add_trace(go.Scatter(
                 x=[row['Date']],
                 y=[row['Y_Normalized']],
@@ -142,7 +145,10 @@ class DashboardState:
                 marker=dict(
                     size=15,
                     color=color,
-                    line=dict(color='black', width=1)
+                    line=dict(
+                        color='#2c5282' if is_today else 'black',
+                        width=3 if is_today else 1
+                    )
                 ),
                 text=hover_text,
                 hoverinfo='text',
@@ -317,30 +323,41 @@ def create_layout() -> dbc.Container:
         end_date = None
 
     return dbc.Container([
-        # Header row with title and controls
+        # Header row with title
         dbc.Row([
             dbc.Col([
                 html.H1("Journaling with AI", className="mb-0")
+            ], width=12, className="d-flex align-items-center")
+        ], className="mb-4"),
+        
+        # Search and Date filter row
+        dbc.Row([
+            dbc.Col([
+                html.Label("Search:", className="me-2", style={'fontSize': '18px'}),
+                dcc.Input(
+                    id='search-input',
+                    type='text',
+                    placeholder='Search in content...',
+                    className="form-control",
+                    style={'width': '300px'}
+                )
             ], width=6, className="d-flex align-items-center"),
             dbc.Col([
-                dbc.Row([
-                    dbc.Col([
-                        html.Label("Date Range:", className="me-2"),
-                        dcc.DatePickerRange(
-                            id='date-picker',
-                            start_date=start_date,
-                            end_date=end_date,
-                            display_format='YYYY-MM-DD'
-                        ),
-                        dbc.Button(
-                            "Reset",
-                            id="reset-range-button",
-                            color="secondary",
-                            className="ms-2"
-                        )
-                    ], className="d-flex align-items-center justify-content-end")
-                ])
-            ], width=6)
+                html.Label("Date Range:", className="me-2", style={'fontSize': '18px'}),
+                dcc.DatePickerRange(
+                    id='date-picker',
+                    start_date=start_date,
+                    end_date=end_date,
+                    display_format='YYYY-MM-DD',
+                    style={'width': 'auto'}
+                ),
+                dbc.Button(
+                    "Reset",
+                    id="reset-range-button",
+                    color="secondary",
+                    style={'marginLeft': '10px'}
+                )
+            ], width=6, className="d-flex align-items-center justify-content-end", style={'gap': '0px'})
         ], className="mb-4"),
         
         # Timeline visualization
@@ -413,7 +430,16 @@ def create_layout() -> dbc.Container:
                                 'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
                                 'column_id': ['Date', 'Time', 'Title']
                             },
-                            'fontWeight': 'bold'
+                            'fontWeight': 'bold',
+                            'color': '#2c5282',  # Darker blue for better contrast
+                            'backgroundColor': 'rgba(44, 82, 130, 0.1)'  # Light blue background
+                        },
+                        {
+                            'if': {
+                                'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
+                                'column_id': ['Content', 'topic', 'Tags', 'Section']
+                            },
+                            'backgroundColor': 'rgba(44, 82, 130, 0.1)'  # Light blue background
                         }
                     ]
                 )
@@ -431,10 +457,11 @@ app.layout = create_layout()
     [Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date'),
      Input('timeline-graph', 'clickData'),
-     Input('reset-range-button', 'n_clicks')]
+     Input('reset-range-button', 'n_clicks'),
+     Input('search-input', 'value')]
 )
-def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str], clickData: Optional[dict], reset_clicks: Optional[int]) -> Tuple[list, dict, str, str]:
-    """Update both the table and timeline based on selected date range or click event"""
+def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str], clickData: Optional[dict], reset_clicks: Optional[int], search_text: Optional[str]) -> Tuple[list, dict, str, str]:
+    """Update both the table and timeline based on selected date range, click event, or search text"""
     if state.df is None or state.df.empty:
         return [], {}, None, None
     
@@ -458,11 +485,23 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
         start_date = (today - pd.Timedelta(days=14)).strftime('%Y-%m-%d')
         end_date = (today + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
     
+    # Apply date filter
     mask = pd.Series(True, index=state.df.index)
     mask &= state.df['Date'] >= start_date
     mask &= state.df['Date'] <= end_date
     
     filtered_df = state.df[mask].copy()
+    
+    # Apply text search filter if search text is provided
+    if search_text and search_text.strip():
+        search_text = search_text.lower().strip()
+        search_mask = (
+            filtered_df['Content'].str.lower().str.contains(search_text, na=False) |
+            filtered_df['Title'].str.lower().str.contains(search_text, na=False) |
+            filtered_df['emotion'].str.lower().str.contains(search_text, na=False) |
+            filtered_df['topic'].str.lower().str.contains(search_text, na=False)
+        )
+        filtered_df = filtered_df[search_mask]
     
     # Replace 'blank', '/', 'blank /', 'neutral', and empty values with empty string for display
     for col in ['emotion', 'topic', 'etc']:
