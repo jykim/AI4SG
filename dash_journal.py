@@ -56,7 +56,12 @@ class Config:
                 'input_dir': 'input',
                 'output_dir': 'output',
                 'api_cache_dir': 'api_cache',
-                'min_process_interval': 600
+                'min_process_interval': 600,
+                'suggested_questions': [
+                    "What's the status so far?",
+                    "What should I do next?",
+                    "Anything to reflect on?"
+                ]
             }
         
         # Set configuration values
@@ -64,6 +69,11 @@ class Config:
         self.output_dir = Path(config.get('output_dir', 'output'))
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
         self.min_process_interval = config.get('min_process_interval', 600)
+        self.suggested_questions = config.get('suggested_questions', [
+            "What's the status so far?",
+            "What should I do next?",
+            "Anything to reflect on?"
+        ])
         
         # API key should be set via environment variable
         self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
@@ -549,6 +559,19 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ))
 
+    # Create suggested questions buttons
+    suggested_questions = []
+    for i, question in enumerate(state.config.suggested_questions, 1):
+        suggested_questions.append(
+            dbc.Button(
+                question,
+                id=f'suggested-q{i}',
+                color="light",
+                className="me-2",
+                style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
+            )
+        )
+
     return dbc.Container([
         # Store component for journal data
         dcc.Store(
@@ -744,29 +767,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                         # Suggested questions
                         html.Div([
                             html.Label("Suggested Questions:", className="mt-2 mb-1", style={'fontSize': '14px', 'color': '#6c757d'}),
-                            dbc.ButtonGroup([
-                                dbc.Button(
-                                    "What's the status so far?",
-                                    id='suggested-q1',
-                                    color="light",
-                                    className="me-2",
-                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
-                                ),
-                                dbc.Button(
-                                    "What should I do next?",
-                                    id='suggested-q2',
-                                    color="light",
-                                    className="me-2",
-                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
-                                ),
-                                dbc.Button(
-                                    "Anything to reflect on?",
-                                    id='suggested-q3',
-                                    color="light",
-                                    className="me-2",
-                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
-                                )
-                            ], className="w-100 d-flex justify-content-between")
+                            dbc.ButtonGroup(suggested_questions, className="w-100 d-flex justify-content-between")
                         ], className="mt-2")
                     ], className="p-2")
                 ], className="h-100")
@@ -825,39 +826,37 @@ def expand_message(n_clicks, full_content):
     ],
     [
         Input('send-button', 'n_clicks'),
-        Input('chat-input', 'n_submit'),
-        Input('suggested-q1', 'n_clicks'),
-        Input('suggested-q2', 'n_clicks'),
-        Input('suggested-q3', 'n_clicks')
-    ],
+        Input('chat-input', 'n_submit')
+    ] + [Input(f'suggested-q{i}', 'n_clicks') for i in range(1, len(config.suggested_questions) + 1)],
     [
         State('chat-input', 'value'),
         State('chat-messages', 'children'),
     ],
     prevent_initial_call=True
 )
-def handle_chat_message(n_clicks, n_submit, q1_clicks, q2_clicks, q3_clicks, message, current_messages):
+def handle_chat_message(n_clicks, n_submit, *args):
     """Handle chat messages and get AI responses"""
+    message = args[-2]  # Second to last argument is the message
+    current_messages = args[-1]  # Last argument is current_messages
+    
     ctx = dash.callback_context
     if not ctx.triggered:
         return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
     
     # Handle suggested questions
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    if triggered_id in ['suggested-q1', 'suggested-q2', 'suggested-q3']:
-        question_map = {
-            'suggested-q1': "What's the status so far?",
-            'suggested-q2': "What should I do next?",
-            'suggested-q3': "Anything to reflect on?"
-        }
-        message = question_map[triggered_id]
+    if triggered_id.startswith('suggested-q'):
+        # Extract the number from the ID (e.g., 'suggested-q1' -> 1)
+        try:
+            question_index = int(triggered_id.replace('suggested-q', '')) - 1
+            if 0 <= question_index < len(config.suggested_questions):
+                message = config.suggested_questions[question_index]
+        except ValueError:
+            logging.error(f"Invalid suggested question ID: {triggered_id}")
+            return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
     
     if not message:  # Don't process empty messages
         return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
-    
-    # Initialize messages list if None
-    if current_messages is None:
-        current_messages = html.Div([], style={'display': 'flex', 'flexDirection': 'column'})
     
     # Get current timestamp
     current_time = datetime.now()

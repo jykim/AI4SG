@@ -10,4 +10,9 @@ journal_dir: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Jou
 openai_api_key: ""  # Your OpenAI API key (should be set via environment variable)
 
 # Processing Settings
-min_process_interval: 600  # Minimum seconds between processing runs (10 minutes) 
+min_process_interval: 600  # Minimum seconds between processing runs (10 minutes)
+
+suggested_questions:
+  - "오늘 반성할 점은?"
+  - "오늘 내 상태는?"
+  - "내일은 뭘 할까?"
