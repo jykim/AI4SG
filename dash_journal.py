@@ -594,42 +594,41 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                 dbc.Row([
                     dbc.Col([
                         dbc.InputGroup([
-                            dbc.InputGroupText("Search:", className="bg-light"),
                             dbc.Input(
                                 id='search-input',
                                 type='text',
-                                placeholder='Search in content...',
+                                placeholder='Search...',
                                 className="form-control",
-                                style={'width': '250px'}
+                                style={'width': '250px', 'fontSize': '13px'}
                             )
                         ], className="me-3"),
                         dbc.InputGroup([
-                            dbc.InputGroupText("Tags:", className="bg-light"),
                             dcc.Dropdown(
                                 id='emoji-filter',
                                 options=[],  # Will be populated in callback
-                                placeholder='Select tag...',
-                                style={'width': '180px'},
+                                placeholder='Filter by tag...',
+                                style={'width': '180px', 'fontSize': '13px'},
                                 clearable=True
                             )
                         ], className="me-3")
                     ], width=6, className="d-flex align-items-center"),
                     dbc.Col([
                         dbc.InputGroup([
-                            dbc.InputGroupText("Date Range:", className="bg-light"),
                             dcc.DatePickerRange(
                                 id='date-picker',
                                 start_date=start_date,
                                 end_date=end_date,
                                 display_format='YYYY-MM-DD',
-                                style={'width': 'auto'}
+                                style={'width': 'auto', 'fontSize': '13px'},
+                                className='date-picker-small'
                             ),
                             dbc.Button(
                                 "Reset",
                                 id="reset-range-button",
                                 color="secondary",
                                 size="sm",
-                                className="ms-2"
+                                className="ms-2",
+                                style={'fontSize': '13px'}
                             )
                         ], className="justify-content-end")
                     ], width=6, className="d-flex align-items-center")
@@ -784,6 +783,40 @@ if state.df is not None:
 # Initialize Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.layout = create_layout(state)
+
+# Add custom CSS
+app._favicon = None
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            .date-picker-small input {
+                font-size: 13px !important;
+            }
+            .DateRangePickerInput {
+                font-size: 13px !important;
+            }
+            .DateInput_input {
+                font-size: 13px !important;
+                padding: 4px 8px !important;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
 # Add callback for expanding messages
 @app.callback(
