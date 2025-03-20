@@ -1,20 +1,42 @@
+"""
+Journal Dashboard with AI Assistant
+
+This module implements a Dash-based web application that provides an interactive
+interface for viewing and analyzing journal entries. It includes:
+
+- A timeline visualization of journal entries
+- A searchable and filterable table of entries
+- An AI chat assistant for analyzing journal content
+- Real-time updates when new entries are added
+- Emoji-based tagging and filtering
+
+The dashboard integrates with OpenAI's GPT-4 for intelligent analysis and
+maintains chat history with proper timestamps.
+"""
+
+# Standard library imports
+import argparse
+import logging
+import os
+import signal
+import subprocess
+import threading
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, Tuple, Dict, Any, List
+
+# Third-party imports
 import dash
 from dash import html, dcc, dash_table
 import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output, State, MATCH
 import pandas as pd
-import yaml
 import plotly.graph_objects as go
-from datetime import datetime
-import threading
-import time
-import subprocess
-import logging
-import signal
-import argparse
-from pathlib import Path
-import os
-from typing import Optional, Tuple, Dict, Any
+import yaml
+
+# Local imports
+from agent_utils import get_chat_response, get_todays_chat_log
 
 class Config:
     """Configuration class to manage application settings"""
@@ -65,6 +87,9 @@ logging.basicConfig(
     ]
 )
 
+# Filter out Dash's GET request logs
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
 class DashboardState:
     """Manages the global state of the dashboard"""
     def __init__(self, config: Optional[Config] = None):
@@ -77,6 +102,9 @@ class DashboardState:
         self.processing_requested = False
         self.last_content_hash = None  # Track content changes
         self.config = config or Config()  # Use provided config or create new one
+        # Chat state
+        self.chat_messages = []  # List of dicts with 'role' and 'content' keys
+        self.chat_history = []  # List of dicts with 'role', 'content', and 'timestamp' keys
 
     def load_data(self) -> Optional[pd.DataFrame]:
         """Load and process the journal data"""
@@ -340,6 +368,95 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
         return '#FFFFFF'
     return color_str
 
+def format_chat_message(content, is_user=False, is_latest=False, timestamp=None):
+    """Format a chat message with proper styling and truncation."""
+    # Generate a unique ID for the message using timestamp, content hash, and random component
+    content_str = str(content) if isinstance(content, list) else content
+    random_component = hash(f"{content_str}{time.time()}{is_user}")
+    message_id = f"msg-{int(time.time() * 1000)}-{abs(random_component) % 100000}"
+    
+    # Use provided timestamp or current time
+    if timestamp is None:
+        timestamp = datetime.now()
+    elif isinstance(timestamp, str):
+        try:
+            # Try both formats: with and without seconds
+            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+                try:
+                    timestamp = datetime.strptime(timestamp, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                timestamp = datetime.now()
+        except Exception:
+            timestamp = datetime.now()
+    
+    # Format time for display (HH:MM)
+    time_str = timestamp.strftime("%H:%M")
+    
+    is_long = len(content) > 100 and not is_latest
+    display_content = content if not is_long else content[:100]
+    
+    message_content = [
+        html.Div([
+            html.Strong("You: " if is_user else "Assistant: "),
+            html.Div(
+                [
+                    html.Span(display_content),
+                    html.Button(
+                        "...",
+                        id={'type': 'expand-button', 'index': message_id},
+                        n_clicks=0,
+                        style={
+                            'background': 'none',
+                            'border': 'none',
+                            'color': '#0d6efd',
+                            'cursor': 'pointer',
+                            'padding': '0 4px',
+                            'display': 'inline' if is_long else 'none'
+                        }
+                    )
+                ],
+                id={'type': 'message-content', 'index': message_id},
+                style={
+                    'display': 'inline',
+                    'word-wrap': 'break-word'
+                }
+            )
+        ]),
+        html.Div(
+            time_str,
+            style={
+                'font-size': '0.8em',
+                'color': '#6c757d',
+                'text-align': 'right' if is_user else 'left',
+                'margin-top': '4px',
+                'padding-right' if is_user else 'padding-left': '8px'
+            }
+        )
+    ]
+    
+    # Store the full content in a hidden div
+    if is_long:
+        message_content.append(
+            html.Div(
+                content,
+                id={'type': 'full-content', 'index': message_id},
+                style={'display': 'none'}
+            )
+        )
+    
+    return dbc.Alert(
+        message_content,
+        color="primary" if is_user else "info",
+        style={
+            'text-align': 'right' if is_user else 'left',
+            'margin': '5px',
+            'white-space': 'pre-wrap'
+        }
+    )
+
 def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
     """Create the dashboard layout"""
     if state is None:
@@ -354,138 +471,275 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
         start_date = None
         end_date = None
 
+    # Get today's chat history for initial load
+    chat_log = get_todays_chat_log()
+    
+    # Prepare initial messages
+    initial_messages = []
+    has_todays_chat = False
+    if chat_log:
+        # Parse chat log and format messages
+        entries = chat_log.split('### Chat Entry - ')
+        for entry in entries:
+            if entry.strip():
+                # Extract timestamp and messages
+                lines = entry.strip().split('\n')
+                if lines:
+                    has_todays_chat = True  # Mark that we have chat history
+                    current_message = ""
+                    current_role = None
+                    entry_timestamp = None
+                    
+                    # Parse the timestamp from the first line
+                    if lines[0].strip():
+                        try:
+                            # Try both formats: with and without seconds
+                            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+                                try:
+                                    entry_timestamp = datetime.strptime(lines[0].strip(), fmt)
+                                    break
+                                except ValueError:
+                                    continue
+                            if entry_timestamp is None:
+                                entry_timestamp = datetime.now()
+                                logging.warning(f"Could not parse timestamp with any format: {lines[0].strip()}")
+                        except Exception as e:
+                            entry_timestamp = datetime.now()
+                            logging.warning(f"Error parsing timestamp: {lines[0].strip()} - {str(e)}")
+                    
+                    for line in lines[1:]:  # Skip the timestamp line
+                        if line.startswith('**User**:'):
+                            # If we have a previous message, add it
+                            if current_message and current_role:
+                                initial_messages.append(format_chat_message(
+                                    current_message.strip(),
+                                    is_user=(current_role == 'user'),
+                                    timestamp=entry_timestamp
+                                ))
+                            current_role = 'user'
+                            current_message = line.replace('**User**:', '').strip()
+                        elif line.startswith('**Assistant**:'):
+                            # If we have a previous message, add it
+                            if current_message and current_role:
+                                initial_messages.append(format_chat_message(
+                                    current_message.strip(),
+                                    is_user=(current_role == 'user'),
+                                    timestamp=entry_timestamp
+                                ))
+                            current_role = 'assistant'
+                            current_message = line.replace('**Assistant**:', '').strip()
+                        else:
+                            # Append to current message if it's a continuation
+                            if current_message and line.strip():
+                                current_message += "\n" + line.strip()
+                    
+                    # Add the last message if there is one
+                    if current_message and current_role:
+                        initial_messages.append(format_chat_message(
+                            current_message.strip(),
+                            is_user=(current_role == 'user'),
+                            timestamp=entry_timestamp
+                        ))
+    
+    # Add welcome message only if there's no chat history for today
+    if not has_todays_chat:
+        initial_messages.append(format_chat_message(
+            "Hi! I'm your own AI assistant. What can I do for you?",
+            is_user=False,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
     return dbc.Container([
+        # Store component for journal data
+        dcc.Store(
+            id='journal-data-store',
+            data=state.df.to_dict('records') if state.df is not None else []
+        ),
+        
         # Header row with title
         dbc.Row([
             dbc.Col([
                 html.H1("Journaling with AI", className="mb-0")
             ], width=12, className="d-flex align-items-center")
-        ], className="mb-4"),
+        ], className="mb-2"),  # Reduced from mb-3
         
-        # Search and Date filter row
+        # Main content area with journal and chat
         dbc.Row([
+            # Left column - Journal content
             dbc.Col([
-                html.Label("Search:", className="me-2", style={'fontSize': '18px'}),
-                dcc.Input(
-                    id='search-input',
-                    type='text',
-                    placeholder='Search in content...',
-                    className="form-control",
-                    style={'width': '300px'}
-                ),
-                html.Label("Tags:", className="ms-4 me-3", style={'fontSize': '18px'}),
-                dcc.Dropdown(
-                    id='emoji-filter',
-                    options=[],  # Will be populated in callback
-                    placeholder='Select tag...',
-                    style={'width': '200px'},
-                    clearable=True
-                )
-            ], width=6, className="d-flex align-items-center"),
-            dbc.Col([
-                html.Label("Date Range:", className="me-2", style={'fontSize': '18px'}),
-                dcc.DatePickerRange(
-                    id='date-picker',
-                    start_date=start_date,
-                    end_date=end_date,
-                    display_format='YYYY-MM-DD',
-                    style={'width': 'auto'}
-                ),
-                dbc.Button(
-                    "Reset",
-                    id="reset-range-button",
-                    color="secondary",
-                    style={'marginLeft': '10px'}
-                )
-            ], width=6, className="d-flex align-items-center justify-content-end", style={'gap': '0px'})
-        ], className="mb-4"),
-        
-        # Timeline visualization
-        dbc.Row([
-            dbc.Col([
-                dcc.Graph(
-                    id='timeline-graph',
-                    figure=state.create_timeline_figure(state.df) if state.df is not None else {},
-                    clickData=None  # Add clickData property
-                )
-            ], width=12)
-        ], className="mb-4"),
-        
-        # DataTable
-        dbc.Row([
-            dbc.Col([
-                dash_table.DataTable(
-                    id='journal-table',
-                    columns=[
-                        {"name": "Date", "id": "Date"},
-                        {"name": "Time", "id": "Time"},
-                        {"name": "Title", "id": "Title"},
-                        {"name": "Emotion", "id": "emotion"},
-                        {"name": "Topic", "id": "topic"},
-                        {"name": "Tags", "id": "Tags"},
-                        {"name": "Content", "id": "Content"}
-                    ],
-                    data=state.df.to_dict('records') if state.df is not None and not state.df.empty else [],
-                    style_table={'height': '70vh', 'overflowY': 'auto'},
-                    style_cell={
-                        'textAlign': 'left',
-                        'padding': '10px',
-                        'whiteSpace': 'pre-wrap',
-                        'height': 'auto',
-                        'minWidth': '50px',
-                        'maxWidth': '500px',
-                        'overflow': 'hidden',
-                        'textOverflow': 'ellipsis',
-                    },
-                    style_cell_conditional=[
-                        {'if': {'column_id': 'Date'}, 'width': '100px'},
-                        {'if': {'column_id': 'Time'}, 'width': '80px'},
-                        {'if': {'column_id': 'Title'}, 'width': '150px'},
-                        {'if': {'column_id': 'emotion'}, 'width': '100px'},
-                        {'if': {'column_id': 'topic'}, 'width': '100px'},
-                        {'if': {'column_id': 'Tags'}, 'width': '150px'},
-                        {'if': {'column_id': 'Content'}, 'width': '400px'},
-                    ],
-                    style_header={
-                        'backgroundColor': 'rgb(230, 230, 230)',
-                        'fontWeight': 'bold'
-                    },
-                    style_data_conditional=[
-                        {
-                            'if': {'row_index': 'odd'},
-                            'backgroundColor': 'rgb(248, 248, 248)'
-                        }
-                    ] + [
-                        {
-                            'if': {
-                                'filter_query': f'{{emotion}} = "{emotion}"',
-                                'column_id': 'emotion'
+                # Search and Date filter row
+                dbc.Row([
+                    dbc.Col([
+                        html.Label("Search:", className="me-2", style={'fontSize': '16px'}),
+                        dcc.Input(
+                            id='search-input',
+                            type='text',
+                            placeholder='Search in content...',
+                            className="form-control",
+                            style={'width': '250px'}
+                        ),
+                        html.Label("Tags:", className="ms-3 me-2", style={'fontSize': '16px'}),
+                        dcc.Dropdown(
+                            id='emoji-filter',
+                            options=[],  # Will be populated in callback
+                            placeholder='Select tag...',
+                            style={'width': '180px'},
+                            clearable=True
+                        )
+                    ], width=6, className="d-flex align-items-center"),
+                    dbc.Col([
+                        html.Label("Date Range:", className="me-2", style={'fontSize': '16px'}),
+                        dcc.DatePickerRange(
+                            id='date-picker',
+                            start_date=start_date,
+                            end_date=end_date,
+                            display_format='YYYY-MM-DD',
+                            style={'width': 'auto'}
+                        ),
+                        dbc.Button(
+                            "Reset",
+                            id="reset-range-button",
+                            color="secondary",
+                            size="sm",
+                            style={'marginLeft': '10px'}
+                        )
+                    ], width=6, className="d-flex align-items-center justify-content-end", style={'gap': '0px'})
+                ], className="mb-2"),  # Reduced from mb-3
+                
+                # Timeline visualization
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(
+                            id='timeline-graph',
+                            figure=state.create_timeline_figure(state.df) if state.df is not None else {},
+                            clickData=None,
+                            style={'height': '180px'}  # Reduced from 200px
+                        )
+                    ], width=12)
+                ], className="mb-2"),  # Reduced from mb-3
+                
+                # DataTable
+                dbc.Row([
+                    dbc.Col([
+                        dash_table.DataTable(
+                            id='journal-table',
+                            columns=[
+                                {"name": "Date", "id": "Date"},
+                                {"name": "Time", "id": "Time"},
+                                {"name": "Title", "id": "Title"},
+                                {"name": "Emotion", "id": "emotion"},
+                                {"name": "Topic", "id": "topic"},
+                                {"name": "Tags", "id": "Tags"},
+                                {"name": "Content", "id": "Content"}
+                            ],
+                            data=state.df.to_dict('records') if state.df is not None and not state.df.empty else [],
+                            style_table={
+                                'height': 'calc(100vh - 300px)',  # Adjusted from 500px
+                                'overflowY': 'auto'
                             },
-                            'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
-                        }
-                        for emotion in state.df['emotion'].unique() if state.df is not None and emotion  # Only add style for non-empty emotions
-                    ] + [
-                        {
-                            'if': {
-                                'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
-                                'column_id': ['Date', 'Time', 'Title']
+                            style_cell={
+                                'textAlign': 'left',
+                                'padding': '8px',
+                                'whiteSpace': 'pre-wrap',
+                                'height': 'auto',
+                                'minWidth': '50px',
+                                'maxWidth': '500px',
+                                'overflow': 'hidden',
+                                'textOverflow': 'ellipsis',
+                                'fontSize': '14px'
                             },
-                            'fontWeight': 'bold',
-                            'color': '#2c5282',  # Darker blue for better contrast
-                            'backgroundColor': 'rgba(44, 82, 130, 0.1)'  # Light blue background
-                        },
-                        {
-                            'if': {
-                                'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
-                                'column_id': ['Content', 'topic', 'Tags', 'Section']
+                            style_cell_conditional=[
+                                {'if': {'column_id': 'Date'}, 'width': '100px'},
+                                {'if': {'column_id': 'Time'}, 'width': '80px'},
+                                {'if': {'column_id': 'Title'}, 'width': '150px'},
+                                {'if': {'column_id': 'emotion'}, 'width': '100px'},
+                                {'if': {'column_id': 'topic'}, 'width': '100px'},
+                                {'if': {'column_id': 'Tags'}, 'width': '150px'},
+                                {'if': {'column_id': 'Content'}, 'width': '400px'},
+                            ],
+                            style_header={
+                                'backgroundColor': 'rgb(230, 230, 230)',
+                                'fontWeight': 'bold',
+                                'fontSize': '14px'
                             },
-                            'backgroundColor': 'rgba(44, 82, 130, 0.1)'  # Light blue background
-                        }
-                    ]
-                )
-            ], width=12)
-        ])
-    ])
+                            style_data_conditional=[
+                                {
+                                    'if': {'row_index': 'odd'},
+                                    'backgroundColor': 'rgb(248, 248, 248)'
+                                }
+                            ] + [
+                                {
+                                    'if': {
+                                        'filter_query': f'{{emotion}} = "{emotion}"',
+                                        'column_id': 'emotion'
+                                    },
+                                    'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
+                                }
+                                for emotion in state.df['emotion'].unique() if state.df is not None and emotion
+                            ] + [
+                                {
+                                    'if': {
+                                        'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
+                                        'column_id': ['Date', 'Time', 'Title']
+                                    },
+                                    'fontWeight': 'bold',
+                                    'color': '#2c5282',
+                                    'backgroundColor': 'rgba(44, 82, 130, 0.1)'
+                                },
+                                {
+                                    'if': {
+                                        'filter_query': f'{{Date}} = "{pd.Timestamp.now().strftime("%Y-%m-%d")}"',
+                                        'column_id': ['Content', 'topic', 'Tags', 'Section']
+                                    },
+                                    'backgroundColor': 'rgba(44, 82, 130, 0.1)'
+                                }
+                            ]
+                        )
+                    ], width=12)
+                ])
+            ], width=8, className="pe-2"),  # Added padding to the right
+            
+            # Right column - Chat interface
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader("Chat with AI Assistant", className="bg-primary text-white py-2"),
+                    dbc.CardBody([
+                        # Chat messages container with initial messages and auto-scroll
+                        html.Div(
+                            id='chat-messages',
+                            style={
+                                'height': 'calc(100vh - 300px)',
+                                'overflowY': 'auto',
+                                'padding': '10px',
+                                'marginBottom': '10px',
+                                'display': 'flex',
+                                'flexDirection': 'column-reverse'  # Reverse order for bottom-up layout
+                            },
+                            children=html.Div(
+                                initial_messages,
+                                style={'display': 'flex', 'flexDirection': 'column'}
+                            )
+                        ),
+                        # Chat input area
+                        dbc.InputGroup([
+                            dbc.Textarea(
+                                id='chat-input',
+                                placeholder='Type your message here...',
+                                style={'resize': 'none', 'height': '60px', 'fontSize': '14px'},
+                                className="me-2"
+                            ),
+                            dbc.Button(
+                                "Send",
+                                id='send-button',
+                                color="primary",
+                                className="px-4"
+                            )
+                        ])
+                    ], className="p-2")
+                ], className="h-100")
+            ], width=4, className="ps-2")
+        ], className="g-0")
+    ], fluid=True, className="px-4 h-100")
 
 # Initialize global state
 state = DashboardState()
@@ -497,6 +751,215 @@ if state.df is not None:
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.layout = create_layout(state)
 
+# Add callback for expanding messages
+@app.callback(
+    Output({'type': 'message-content', 'index': MATCH}, 'children'),
+    Input({'type': 'expand-button', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'full-content', 'index': MATCH}, 'children'),
+    prevent_initial_call=True
+)
+def expand_message(n_clicks, full_content):
+    """Handle message expansion when ... is clicked"""
+    if n_clicks is None or n_clicks == 0:
+        raise dash.exceptions.PreventUpdate
+    
+    # Get the current message ID from the callback context
+    ctx = dash.callback_context
+    message_id = ctx.triggered[0]['prop_id'].split('.')[0].split('"index":')[1].strip('}').strip('"')
+    
+    # Return the full content with the expand button hidden
+    return [
+        html.Span(full_content),
+        html.Button(
+            "...",
+            id={'type': 'expand-button', 'index': message_id},
+            n_clicks=0,
+            style={
+                'background': 'none',
+                'border': 'none',
+                'color': '#0d6efd',
+                'cursor': 'pointer',
+                'padding': '0 4px',
+                'display': 'none'  # Hide the button after expansion
+            }
+        )
+    ]
+
+@app.callback(
+    [
+        Output('chat-messages', 'children'),
+        Output('chat-input', 'value'),
+    ],
+    [
+        Input('send-button', 'n_clicks'),
+        Input('chat-input', 'n_submit')
+    ],
+    [
+        State('chat-input', 'value'),
+        State('chat-messages', 'children'),
+    ],
+    prevent_initial_call=True
+)
+def handle_chat_message(n_clicks, n_submit, message, current_messages):
+    """Handle chat messages and get AI responses"""
+    if not message:  # Don't process empty messages
+        return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
+    
+    # Initialize messages list if None
+    if current_messages is None:
+        current_messages = html.Div([], style={'display': 'flex', 'flexDirection': 'column'})
+    
+    # Get current timestamp
+    current_time = datetime.now()
+    
+    # Get existing messages and mark them as not latest
+    existing_messages = []
+    if current_messages and isinstance(current_messages, dict) and current_messages.get('props', {}).get('children'):
+        messages_list = current_messages['props']['children']
+        if isinstance(messages_list, dict):
+            messages_list = [messages_list]
+            
+        for msg in messages_list:
+            if not isinstance(msg, dict) or 'props' not in msg:
+                continue
+                
+            msg_children = msg['props'].get('children', [])
+            if not msg_children or len(msg_children) < 2:
+                continue
+                
+            # Skip loading message
+            if any(isinstance(child, dict) and 
+                  isinstance(child.get('props', {}).get('children'), list) and 
+                  any(isinstance(c, dict) and c.get('type') == 'Spinner' for c in child['props']['children'])
+                  for child in msg_children):
+                continue
+                
+            # Extract timestamp from the message
+            timestamp_div = next(
+                (child for child in msg_children
+                 if isinstance(child, dict) and 
+                 child.get('props', {}).get('style', {}).get('color') == '#6c757d'),
+                None
+            )
+            timestamp_str = timestamp_div.get('props', {}).get('children') if timestamp_div else None
+            
+            # Get message content
+            content_div = msg_children[0]
+            if not isinstance(content_div, dict):
+                continue
+                
+            content_children = content_div.get('props', {}).get('children', [])
+            if not content_children:
+                continue
+                
+            # Get the content after "You: " or "Assistant: "
+            content_span = content_children[1] if len(content_children) > 1 else None
+            if not isinstance(content_span, dict):
+                continue
+                
+            content = content_span.get('props', {}).get('children', [{}])[0].get('props', {}).get('children', '')
+            is_user = 'You: ' in content_children[0].get('props', {}).get('children', '')
+            
+            # Format message with original timestamp if available
+            if timestamp_str:
+                try:
+                    msg_time = datetime.strptime(f"{current_time.strftime('%Y-%m-%d')} {timestamp_str}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    msg_time = current_time
+            else:
+                msg_time = current_time
+                
+            existing_messages.append(format_chat_message(content, is_user=is_user, is_latest=False, timestamp=msg_time))
+    
+    # Create user message component (latest)
+    user_message = format_chat_message(message, is_user=True, is_latest=True, timestamp=current_time)
+    
+    # Create loading message component
+    loading_message = dbc.Alert(
+        [
+            html.Strong("Assistant: "), 
+            dbc.Spinner(size="sm", color="info", spinner_class_name="me-2"),
+            "Thinking..."
+        ],
+        color="light",
+        style={
+            'text-align': 'left',
+            'margin': '5px',
+            'white-space': 'pre-wrap'
+        }
+    )
+    
+    # Add user message and loading indicator
+    temp_messages = html.Div(
+        existing_messages + [user_message, loading_message],
+        style={'display': 'flex', 'flexDirection': 'column'}
+    )
+    
+    # Create chat history for the API
+    chat_history = []
+    for msg in existing_messages:
+        if not isinstance(msg, dict) or 'props' not in msg:
+            continue
+            
+        msg_children = msg['props'].get('children', [])
+        if not msg_children or len(msg_children) < 2:
+            continue
+            
+        # Extract timestamp
+        timestamp_div = next(
+            (child for child in msg_children
+             if isinstance(child, dict) and 
+             child.get('props', {}).get('style', {}).get('color') == '#6c757d'),
+            None
+        )
+        timestamp_str = timestamp_div.get('props', {}).get('children') if timestamp_div else None
+        
+        # Get message content
+        content_div = msg_children[0]
+        if not isinstance(content_div, dict):
+            continue
+            
+        content_children = content_div.get('props', {}).get('children', [])
+        if not content_children:
+            continue
+            
+        # Get the content after "You: " or "Assistant: "
+        content_span = content_children[1] if len(content_children) > 1 else None
+        if not isinstance(content_span, dict):
+            continue
+            
+        content = content_span.get('props', {}).get('children', [{}])[0].get('props', {}).get('children', '')
+        is_user = 'You: ' in content_children[0].get('props', {}).get('children', '')
+        
+        if timestamp_str:
+            try:
+                msg_time = datetime.strptime(f"{current_time.strftime('%Y-%m-%d')} {timestamp_str}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                msg_time = current_time
+        else:
+            msg_time = current_time
+            
+        chat_history.append({
+            'role': 'user' if is_user else 'assistant',
+            'content': content,
+            'timestamp': msg_time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    # Get response from agent using the complete dataset from state
+    response_data = get_chat_response(message, state.df, chat_history)
+    ai_response = response_data['response']
+    chat_log = response_data['chat_log']
+    
+    # Create AI message component (latest)
+    ai_message = format_chat_message(ai_response, is_user=False, is_latest=True, timestamp=current_time)
+    
+    # Update messages list
+    new_messages = existing_messages + [user_message, ai_message]
+    
+    # Return updated messages in a Div with flex column layout
+    return html.Div(new_messages, style={'display': 'flex', 'flexDirection': 'column'}), ""
+
+# Existing callback for table and timeline
 @app.callback(
     [Output('journal-table', 'data'),
      Output('timeline-graph', 'figure'),
@@ -611,6 +1074,15 @@ def update_table_and_timeline(start_date: Optional[str], end_date: Optional[str]
     
     return filtered_df.to_dict('records'), state.create_timeline_figure(filtered_df), start_date, end_date, emoji_options
 
+# Update journal data store
+@app.callback(
+    Output('journal-data-store', 'data'),
+    [Input('journal-table', 'data')]
+)
+def update_journal_data_store(table_data):
+    """Update the journal data store when table data changes"""
+    return table_data
+
 def handle_sigtstp(signum: int, frame: Any) -> None:
     """Handle Ctrl+Z (SIGTSTP) signal"""
     logging.info("Received Ctrl+Z signal, triggering extraction and annotation...")
@@ -658,7 +1130,7 @@ def main() -> None:
     )
     background_thread.start()
 
-    app.run_server(debug=True)
+    app.run_server(debug=False, port=8050)
 
 if __name__ == '__main__':
     main()

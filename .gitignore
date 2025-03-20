@@ -10,6 +10,7 @@ env/
 
 # API cache and output directories
 api_cache/
+agent_cache/
 output/
 
 # OS generated files
