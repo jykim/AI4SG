@@ -37,6 +37,15 @@ import yaml
 
 # Local imports
 from agent_utils import get_chat_response, get_todays_chat_log
+from chat_utils import (
+    parse_message_timestamp,
+    extract_message_content,
+    extract_message_timestamp,
+    format_chat_message,
+    parse_chat_entry,
+    process_existing_messages,
+    create_chat_history
+)
 
 class Config:
     """Configuration class to manage application settings"""
@@ -382,97 +391,6 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
         return '#FFFFFF'
     return color_str
 
-def format_chat_message(content, is_user=False, is_latest=False, timestamp=None):
-    """Format a chat message with proper styling and truncation."""
-    # Generate a unique ID for the message using timestamp, content hash, and random component
-    content_str = str(content) if isinstance(content, list) else content
-    random_component = hash(f"{content_str}{time.time()}{is_user}")
-    message_id = f"msg-{int(time.time() * 1000)}-{abs(random_component) % 100000}"
-    
-    # Use provided timestamp or current time
-    if timestamp is None:
-        timestamp = datetime.now()
-    elif isinstance(timestamp, str):
-        try:
-            # Try both formats: with and without seconds
-            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
-                try:
-                    timestamp = datetime.strptime(timestamp, fmt)
-                    break
-                except ValueError:
-                    continue
-            else:
-                timestamp = datetime.now()
-        except Exception:
-            timestamp = datetime.now()
-    
-    # Format time for display (HH:MM)
-    time_str = timestamp.strftime("%H:%M")
-    
-    # Split content into words and check if it needs truncation
-    words = content_str.split()
-    is_long = len(words) > config.max_word_count and not is_latest
-    display_content = ' '.join(words[:config.max_word_count]) if is_long else content_str
-    
-    # Create message content with conditional expand button
-    message_content = [
-        html.Div([
-            html.Strong("You: " if is_user else "Assistant: "),
-            html.Div(
-                [
-                    html.Span(display_content),
-                    html.Button(
-                        "...",
-                        id={'type': 'expand-button', 'index': message_id},
-                        n_clicks=0,
-                        style={
-                            'background': 'none',
-                            'border': 'none',
-                            'color': '#0d6efd',
-                            'cursor': 'pointer',
-                            'padding': '0 4px',
-                            'display': 'inline' if is_long else 'none'
-                        }
-                    )
-                ],
-                id={'type': 'message-content', 'index': message_id},
-                style={
-                    'display': 'inline',
-                    'word-wrap': 'break-word'
-                }
-            )
-        ]),
-        html.Div(
-            time_str,
-            style={
-                'font-size': '0.8em',
-                'color': '#6c757d',
-                'text-align': 'right' if is_user else 'left',
-                'margin-top': '4px',
-                'padding-right' if is_user else 'padding-left': '8px'
-            }
-        )
-    ]
-    
-    # Store the full content in a hidden div
-    message_content.append(
-        html.Div(
-            content_str,
-            id={'type': 'full-content', 'index': message_id},
-            style={'display': 'none'}
-        )
-    )
-    
-    return dbc.Alert(
-        message_content,
-        color="primary" if is_user else "info",
-        style={
-            'text-align': 'right' if is_user else 'left',
-            'margin': '5px',
-            'white-space': 'pre-wrap'
-        }
-    )
-
 def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
     """Create the dashboard layout"""
     if state is None:
@@ -498,67 +416,9 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
         entries = chat_log.split('### Chat Entry - ')
         for entry in entries:
             if entry.strip():
-                # Extract timestamp and messages
-                lines = entry.strip().split('\n')
-                if lines:
-                    has_todays_chat = True  # Mark that we have chat history
-                    current_message = ""
-                    current_role = None
-                    entry_timestamp = None
-                    
-                    # Parse the timestamp from the first line
-                    if lines[0].strip():
-                        try:
-                            # Try both formats: with and without seconds
-                            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
-                                try:
-                                    entry_timestamp = datetime.strptime(lines[0].strip(), fmt)
-                                    break
-                                except ValueError:
-                                    continue
-                            if entry_timestamp is None:
-                                entry_timestamp = datetime.now()
-                                logging.warning(f"Could not parse timestamp with any format: {lines[0].strip()}")
-                        except Exception as e:
-                            entry_timestamp = datetime.now()
-                            logging.warning(f"Error parsing timestamp: {lines[0].strip()} - {str(e)}")
-                    
-                    for line in lines[1:]:  # Skip the timestamp line
-                        if line.startswith('**User**:'):
-                            # If we have a previous message, add it
-                            if current_message and current_role:
-                                initial_messages.append(format_chat_message(
-                                    current_message.strip(),
-                                    is_user=(current_role == 'user'),
-                                    is_latest=False,
-                                    timestamp=entry_timestamp
-                                ))
-                            current_role = 'user'
-                            current_message = line.replace('**User**:', '').strip()
-                        elif line.startswith('**Assistant**:'):
-                            # If we have a previous message, add it
-                            if current_message and current_role:
-                                initial_messages.append(format_chat_message(
-                                    current_message.strip(),
-                                    is_user=(current_role == 'user'),
-                                    is_latest=False,
-                                    timestamp=entry_timestamp
-                                ))
-                            current_role = 'assistant'
-                            current_message = line.replace('**Assistant**:', '').strip()
-                        else:
-                            # Append to current message if it's a continuation
-                            if current_message and line.strip():
-                                current_message += "\n" + line.strip()
-                    
-                    # Add the last message if there is one
-                    if current_message and current_role:
-                        initial_messages.append(format_chat_message(
-                            current_message.strip(),
-                            is_user=(current_role == 'user'),
-                            is_latest=True,  # Mark the last message as latest
-                            timestamp=entry_timestamp
-                        ))
+                has_todays_chat = True
+                messages = parse_chat_entry(entry, datetime.now(), max_word_count=state.config.max_word_count)
+                initial_messages.extend(messages)
     
     # Add welcome message only if there's no chat history for today
     if not has_todays_chat:
@@ -566,7 +426,8 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
             "Hi! I'm your own AI assistant. What can I do for you?",
             is_user=False,
             is_latest=True,  # Mark welcome message as latest
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            max_word_count=state.config.max_word_count
         ))
 
     # Create suggested questions buttons
@@ -889,7 +750,6 @@ def handle_chat_message(n_clicks, n_submit, *args):
     # Handle suggested questions
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
     if triggered_id.startswith('suggested-q'):
-        # Extract the number from the ID (e.g., 'suggested-q1' -> 1)
         try:
             question_index = int(triggered_id.replace('suggested-q', '')) - 1
             if 0 <= question_index < len(config.suggested_questions):
@@ -904,67 +764,11 @@ def handle_chat_message(n_clicks, n_submit, *args):
     # Get current timestamp
     current_time = datetime.now()
     
-    # Get existing messages and mark them as not latest
-    existing_messages = []
-    if current_messages and isinstance(current_messages, dict) and current_messages.get('props', {}).get('children'):
-        messages_list = current_messages['props']['children']
-        if isinstance(messages_list, dict):
-            messages_list = [messages_list]
-            
-        for msg in messages_list:
-            if not isinstance(msg, dict) or 'props' not in msg:
-                continue
-                
-            msg_children = msg['props'].get('children', [])
-            if not msg_children or len(msg_children) < 2:
-                continue
-                
-            # Skip loading message
-            if any(isinstance(child, dict) and 
-                  isinstance(child.get('props', {}).get('children'), list) and 
-                  any(isinstance(c, dict) and c.get('type') == 'Spinner' for c in child['props']['children'])
-                  for child in msg_children):
-                continue
-                
-            # Extract timestamp from the message
-            timestamp_div = next(
-                (child for child in msg_children
-                 if isinstance(child, dict) and 
-                 child.get('props', {}).get('style', {}).get('color') == '#6c757d'),
-                None
-            )
-            timestamp_str = timestamp_div.get('props', {}).get('children') if timestamp_div else None
-            
-            # Get message content
-            content_div = msg_children[0]
-            if not isinstance(content_div, dict):
-                continue
-                
-            content_children = content_div.get('props', {}).get('children', [])
-            if not content_children:
-                continue
-                
-            # Get the content after "You: " or "Assistant: "
-            content_span = content_children[1] if len(content_children) > 1 else None
-            if not isinstance(content_span, dict):
-                continue
-                
-            content = content_span.get('props', {}).get('children', [{}])[0].get('props', {}).get('children', '')
-            is_user = 'You: ' in content_children[0].get('props', {}).get('children', '')
-            
-            # Format message with original timestamp if available
-            if timestamp_str:
-                try:
-                    msg_time = datetime.strptime(f"{current_time.strftime('%Y-%m-%d')} {timestamp_str}", "%Y-%m-%d %H:%M")
-                except ValueError:
-                    msg_time = current_time
-            else:
-                msg_time = current_time
-                
-            existing_messages.append(format_chat_message(content, is_user=is_user, is_latest=False, timestamp=msg_time))
+    # Process existing messages
+    existing_messages = process_existing_messages(current_messages, current_time, max_word_count=state.config.max_word_count)
     
     # Create user message component (latest)
-    user_message = format_chat_message(message, is_user=True, is_latest=True, timestamp=current_time)
+    user_message = format_chat_message(message, is_user=True, is_latest=True, timestamp=current_time, max_word_count=state.config.max_word_count)
     
     # Create loading message component
     loading_message = dbc.Alert(
@@ -988,54 +792,7 @@ def handle_chat_message(n_clicks, n_submit, *args):
     )
     
     # Create chat history for the API
-    chat_history = []
-    for msg in existing_messages:
-        if not isinstance(msg, dict) or 'props' not in msg:
-            continue
-            
-        msg_children = msg['props'].get('children', [])
-        if not msg_children or len(msg_children) < 2:
-            continue
-            
-        # Extract timestamp
-        timestamp_div = next(
-            (child for child in msg_children
-             if isinstance(child, dict) and 
-             child.get('props', {}).get('style', {}).get('color') == '#6c757d'),
-            None
-        )
-        timestamp_str = timestamp_div.get('props', {}).get('children') if timestamp_div else None
-        
-        # Get message content
-        content_div = msg_children[0]
-        if not isinstance(content_div, dict):
-            continue
-            
-        content_children = content_div.get('props', {}).get('children', [])
-        if not content_children:
-            continue
-            
-        # Get the content after "You: " or "Assistant: "
-        content_span = content_children[1] if len(content_children) > 1 else None
-        if not isinstance(content_span, dict):
-            continue
-            
-        content = content_span.get('props', {}).get('children', [{}])[0].get('props', {}).get('children', '')
-        is_user = 'You: ' in content_children[0].get('props', {}).get('children', '')
-        
-        if timestamp_str:
-            try:
-                msg_time = datetime.strptime(f"{current_time.strftime('%Y-%m-%d')} {timestamp_str}", "%Y-%m-%d %H:%M")
-            except ValueError:
-                msg_time = current_time
-        else:
-            msg_time = current_time
-            
-        chat_history.append({
-            'role': 'user' if is_user else 'assistant',
-            'content': content,
-            'timestamp': msg_time.strftime("%Y-%m-%d %H:%M:%S")
-        })
+    chat_history = create_chat_history(existing_messages, current_time)
     
     # Get response from agent using the complete dataset from state
     response_data = get_chat_response(message, state.df, chat_history)
@@ -1043,7 +800,7 @@ def handle_chat_message(n_clicks, n_submit, *args):
     chat_log = response_data['chat_log']
     
     # Create AI message component (latest)
-    ai_message = format_chat_message(ai_response, is_user=False, is_latest=True, timestamp=current_time)
+    ai_message = format_chat_message(ai_response, is_user=False, is_latest=True, timestamp=current_time, max_word_count=state.config.max_word_count)
     
     # Update messages list
     new_messages = existing_messages + [user_message, ai_message]
