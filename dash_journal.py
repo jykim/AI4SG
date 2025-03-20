@@ -570,40 +570,46 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                 # Search and Date filter row
                 dbc.Row([
                     dbc.Col([
-                        html.Label("Search:", className="me-2", style={'fontSize': '16px'}),
-                        dcc.Input(
-                            id='search-input',
-                            type='text',
-                            placeholder='Search in content...',
-                            className="form-control",
-                            style={'width': '250px'}
-                        ),
-                        html.Label("Tags:", className="ms-3 me-2", style={'fontSize': '16px'}),
-                        dcc.Dropdown(
-                            id='emoji-filter',
-                            options=[],  # Will be populated in callback
-                            placeholder='Select tag...',
-                            style={'width': '180px'},
-                            clearable=True
-                        )
+                        dbc.InputGroup([
+                            dbc.InputGroupText("Search:", className="bg-light"),
+                            dbc.Input(
+                                id='search-input',
+                                type='text',
+                                placeholder='Search in content...',
+                                className="form-control",
+                                style={'width': '250px'}
+                            )
+                        ], className="me-3"),
+                        dbc.InputGroup([
+                            dbc.InputGroupText("Tags:", className="bg-light"),
+                            dcc.Dropdown(
+                                id='emoji-filter',
+                                options=[],  # Will be populated in callback
+                                placeholder='Select tag...',
+                                style={'width': '180px'},
+                                clearable=True
+                            )
+                        ], className="me-3")
                     ], width=6, className="d-flex align-items-center"),
                     dbc.Col([
-                        html.Label("Date Range:", className="me-2", style={'fontSize': '16px'}),
-                        dcc.DatePickerRange(
-                            id='date-picker',
-                            start_date=start_date,
-                            end_date=end_date,
-                            display_format='YYYY-MM-DD',
-                            style={'width': 'auto'}
-                        ),
-                        dbc.Button(
-                            "Reset",
-                            id="reset-range-button",
-                            color="secondary",
-                            size="sm",
-                            style={'marginLeft': '10px'}
-                        )
-                    ], width=6, className="d-flex align-items-center justify-content-end", style={'gap': '0px'})
+                        dbc.InputGroup([
+                            dbc.InputGroupText("Date Range:", className="bg-light"),
+                            dcc.DatePickerRange(
+                                id='date-picker',
+                                start_date=start_date,
+                                end_date=end_date,
+                                display_format='YYYY-MM-DD',
+                                style={'width': 'auto'}
+                            ),
+                            dbc.Button(
+                                "Reset",
+                                id="reset-range-button",
+                                color="secondary",
+                                size="sm",
+                                className="ms-2"
+                            )
+                        ], className="justify-content-end")
+                    ], width=6, className="d-flex align-items-center")
                 ], className="mb-2"),  # Reduced from mb-3
                 
                 # Timeline visualization
@@ -734,7 +740,34 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                                 color="primary",
                                 className="px-4"
                             )
-                        ])
+                        ]),
+                        # Suggested questions
+                        html.Div([
+                            html.Label("Suggested Questions:", className="mt-2 mb-1", style={'fontSize': '14px', 'color': '#6c757d'}),
+                            dbc.ButtonGroup([
+                                dbc.Button(
+                                    "What's the status so far?",
+                                    id='suggested-q1',
+                                    color="light",
+                                    className="me-2",
+                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
+                                ),
+                                dbc.Button(
+                                    "What should I do next?",
+                                    id='suggested-q2',
+                                    color="light",
+                                    className="me-2",
+                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
+                                ),
+                                dbc.Button(
+                                    "Anything to reflect on?",
+                                    id='suggested-q3',
+                                    color="light",
+                                    className="me-2",
+                                    style={'fontSize': '13px', 'textAlign': 'left', 'whiteSpace': 'normal', 'height': 'auto', 'flex': '1'}
+                                )
+                            ], className="w-100 d-flex justify-content-between")
+                        ], className="mt-2")
                     ], className="p-2")
                 ], className="h-100")
             ], width=4, className="ps-2")
@@ -792,7 +825,10 @@ def expand_message(n_clicks, full_content):
     ],
     [
         Input('send-button', 'n_clicks'),
-        Input('chat-input', 'n_submit')
+        Input('chat-input', 'n_submit'),
+        Input('suggested-q1', 'n_clicks'),
+        Input('suggested-q2', 'n_clicks'),
+        Input('suggested-q3', 'n_clicks')
     ],
     [
         State('chat-input', 'value'),
@@ -800,8 +836,22 @@ def expand_message(n_clicks, full_content):
     ],
     prevent_initial_call=True
 )
-def handle_chat_message(n_clicks, n_submit, message, current_messages):
+def handle_chat_message(n_clicks, n_submit, q1_clicks, q2_clicks, q3_clicks, message, current_messages):
     """Handle chat messages and get AI responses"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
+    
+    # Handle suggested questions
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    if triggered_id in ['suggested-q1', 'suggested-q2', 'suggested-q3']:
+        question_map = {
+            'suggested-q1': "What's the status so far?",
+            'suggested-q2': "What should I do next?",
+            'suggested-q3': "Anything to reflect on?"
+        }
+        message = question_map[triggered_id]
+    
     if not message:  # Don't process empty messages
         return current_messages or html.Div([], style={'display': 'flex', 'flexDirection': 'column'}), ""
     
@@ -956,7 +1006,7 @@ def handle_chat_message(n_clicks, n_submit, message, current_messages):
     # Update messages list
     new_messages = existing_messages + [user_message, ai_message]
     
-    # Return updated messages in a Div with flex column layout
+    # Return updated messages in a Div with flex column layout and clear input
     return html.Div(new_messages, style={'display': 'flex', 'flexDirection': 'column'}), ""
 
 # Existing callback for table and timeline
