@@ -11,8 +11,11 @@ openai_api_key: ""  # Your OpenAI API key (should be set via environment variabl
 
 # Processing Settings
 min_process_interval: 600  # Minimum seconds between processing runs (10 minutes)
+max_entries_for_prompt: 20  # Maximum number of recent entries to include in agent prompt
 
 suggested_questions:
-  - "오늘 반성할 점은?"
+  - "마무리 할 일이 있나?"
+  - "최근 잘한 일은?"
+  - "최근 반성할 점은?"
   - "오늘 내 상태는?"
-  - "내일은 뭘 할까?"
+  - "내일 뭘 할까?"

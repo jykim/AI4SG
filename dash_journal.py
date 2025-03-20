@@ -57,6 +57,7 @@ class Config:
                 'output_dir': 'output',
                 'api_cache_dir': 'api_cache',
                 'min_process_interval': 600,
+                'max_entries_for_prompt': 10,
                 'suggested_questions': [
                     "What's the status so far?",
                     "What should I do next?",
@@ -69,6 +70,7 @@ class Config:
         self.output_dir = Path(config.get('output_dir', 'output'))
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
         self.min_process_interval = config.get('min_process_interval', 600)
+        self.max_entries_for_prompt = config.get('max_entries_for_prompt', 10)
         self.suggested_questions = config.get('suggested_questions', [
             "What's the status so far?",
             "What should I do next?",

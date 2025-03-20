@@ -36,7 +36,8 @@ class Config:
                 'output_dir': 'output',
                 'api_cache_dir': 'api_cache',
                 'agent_cache_dir': 'agent_cache',
-                'min_process_interval': 600
+                'min_process_interval': 600,
+                'max_entries_for_prompt': 10
             }
         
         # Set configuration values
@@ -45,6 +46,7 @@ class Config:
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
         self.agent_cache_dir = Path(config.get('agent_cache_dir', 'agent_cache'))
         self.min_process_interval = config.get('min_process_interval', 600)
+        self.max_entries_for_prompt = config.get('max_entries_for_prompt', 10)
         
         # API key should be set via environment variable
         self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
@@ -77,12 +79,32 @@ def save_to_cache(cache_key: str, response: Dict, config: Optional[Config] = Non
         config = Config()
     cache_file = config.agent_cache_dir / f"{cache_key}.json"
     
+    # Extract journal entries from the prompt if available
+    entries_summary = "No journal entries found in request"
+    if 'request' in response and 'messages' in response['request']:
+        for msg in response['request']['messages']:
+            if msg.get('role') == 'user' and 'content' in msg:
+                content = msg['content']
+                # Look for entries between the prompt and chat history
+                if 'Below are the recent journal entries' in content and 'Today\'s Chat History:' in content:
+                    entries_section = content.split('Below are the recent journal entries')[1].split('Today\'s Chat History:')[0]
+                    titles = []
+                    for line in entries_section.split('\n'):
+                        if line.startswith('## '):
+                            # Extract date and title from the markdown header
+                            title = line.replace('## ', '').strip()
+                            titles.append(title)
+                    if titles:
+                        entries_summary = "Journal entries included in request:\n" + "\n".join(titles)
+                break
+    
     # Add debug information to the cached response
     debug_info = {
         'timestamp': datetime.now().isoformat(),
         'cache_key': cache_key,
         'response_length': len(response.get('content', '')),
         'response': response,
+        'entries_summary': entries_summary,
         'debug': {
             'python_version': os.sys.version,
             'openai_key_exists': bool(config.openai_api_key),
@@ -126,24 +148,48 @@ def format_journal_entries_as_markdown(entries: List[Dict[str, Any]]) -> str:
     
     return markdown
 
-def get_recent_entries(df: pd.DataFrame, days: int = 7) -> pd.DataFrame:
-    """Get entries from the last N days, limited to most recent entries to control token usage."""
+def get_recent_entries(df: pd.DataFrame, days: int = 7, config: Optional[Config] = None) -> pd.DataFrame:
+    """Get entries from both past and future, limited to configured number of entries."""
     if df is None or df.empty:
         return pd.DataFrame()
+    
+    if config is None:
+        config = Config()
     
     # Convert Date column to datetime if it's not already
     df['Date'] = pd.to_datetime(df['Date'])
     
-    # Calculate the date threshold
-    threshold = datetime.now() - timedelta(days=days)
+    # Calculate date range (past and future)
+    today = datetime.now().date()
+    past_threshold = today - timedelta(days=days)
+    future_threshold = today + timedelta(days=days)
     
-    # Filter and sort entries
-    recent_entries = df[df['Date'] >= threshold].copy()
+    # Filter entries within the date range
+    recent_entries = df[
+        (df['Date'].dt.date >= past_threshold) & 
+        (df['Date'].dt.date <= future_threshold)
+    ].copy()
+    
+    # Sort by date
     recent_entries = recent_entries.sort_values('Date', ascending=True)
     
-    # Limit to most recent 10 entries to control token usage
-    if len(recent_entries) > 10:
-        recent_entries = recent_entries.tail(10)
+    # Limit to configured number of entries
+    max_entries = config.max_entries_for_prompt
+    if len(recent_entries) > max_entries:
+        # Try to balance past and future entries
+        past_entries = recent_entries[recent_entries['Date'].dt.date <= today]
+        future_entries = recent_entries[recent_entries['Date'].dt.date > today]
+        
+        # Calculate how many entries to take from each
+        past_count = min(len(past_entries), max_entries // 2)
+        future_count = max_entries - past_count
+        
+        # Take entries from both past and future
+        past_entries = past_entries.tail(past_count)
+        future_entries = future_entries.head(future_count)
+        
+        # Combine past and future entries
+        recent_entries = pd.concat([past_entries, future_entries])
     
     return recent_entries
 
@@ -261,7 +307,7 @@ def get_chat_response(
     )
     
     # Get recent entries and format as markdown
-    recent_entries = get_recent_entries(journal_entries)
+    recent_entries = get_recent_entries(journal_entries, config=config)
     entries_markdown = format_journal_entries_as_markdown(recent_entries.to_dict('records'))
     
     # Get today's chat log and filter for last 60 minutes
