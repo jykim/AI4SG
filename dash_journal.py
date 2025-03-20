@@ -411,7 +411,7 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
     
     # Split content into words and check if it needs truncation
     words = content_str.split()
-    is_long = len(words) > config.max_word_count
+    is_long = len(words) > config.max_word_count and not is_latest
     display_content = ' '.join(words[:config.max_word_count]) if is_long else content_str
     
     # Create message content with conditional expand button
@@ -530,6 +530,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                                 initial_messages.append(format_chat_message(
                                     current_message.strip(),
                                     is_user=(current_role == 'user'),
+                                    is_latest=False,
                                     timestamp=entry_timestamp
                                 ))
                             current_role = 'user'
@@ -540,6 +541,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                                 initial_messages.append(format_chat_message(
                                     current_message.strip(),
                                     is_user=(current_role == 'user'),
+                                    is_latest=False,
                                     timestamp=entry_timestamp
                                 ))
                             current_role = 'assistant'
@@ -554,6 +556,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                         initial_messages.append(format_chat_message(
                             current_message.strip(),
                             is_user=(current_role == 'user'),
+                            is_latest=True,  # Mark the last message as latest
                             timestamp=entry_timestamp
                         ))
     
@@ -562,6 +565,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
         initial_messages.append(format_chat_message(
             "Hi! I'm your own AI assistant. What can I do for you?",
             is_user=False,
+            is_latest=True,  # Mark welcome message as latest
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ))
 
