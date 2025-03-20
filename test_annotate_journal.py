@@ -4,6 +4,7 @@ from annotate_journal import (
     Config as BaseConfig,
     update_csv_with_tags
 )
+import os
 
 # Configure basic logging first
 logging.basicConfig(
@@ -31,8 +32,10 @@ class TestConfig(BaseConfig):
         self.api_cache_dir = Path(config.get('api_cache_dir', 'test_data/api_cache'))
         self.min_process_interval = config.get('min_process_interval', 0)
         
-        # For testing, we'll use a mock API key
-        self.openai_api_key = 'test-api-key'
+        # Use actual API key from environment
+        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
+        if not self.openai_api_key:
+            logging.warning("No OpenAI API key found in environment variables")
         
         # Create all necessary directories
         self.setup_directories()

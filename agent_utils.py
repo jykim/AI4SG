@@ -241,7 +241,8 @@ def get_todays_chat_log(config: Optional[Config] = None) -> str:
     if config is None:
         config = Config()
     
-    chat_log_file = config.output_dir / 'chat_log.md'
+    # Use config's get_chat_log_path method if available, otherwise use default path
+    chat_log_file = getattr(config, 'get_chat_log_path', lambda: config.output_dir / 'chat_log.md')()
     today = datetime.now().strftime("%Y-%m-%d")
     
     if not chat_log_file.exists():

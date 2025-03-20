@@ -23,14 +23,14 @@ class TestConfig(BaseConfig):
             'input_dir': 'input',
             'output_dir': 'test_data/output',
             'api_cache_dir': 'api_cache',
-            'journal_dir': 'test_data'
+            'journal_dir': 'test_data/input'
         }
         
         # Set configuration values
         self.input_dir = Path(config.get('input_dir', 'input'))
         self.output_dir = Path(config.get('output_dir', 'test_data/output'))
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
-        self.journal_dir = Path(config.get('journal_dir', 'test_data'))
+        self.journal_dir = Path(config.get('journal_dir', 'test_data/input'))
 
 def main():
     # Initialize test configuration

@@ -12,6 +12,7 @@ from dash_journal import (
 from datetime import datetime
 import pandas as pd
 from dash import Input, Output, html
+import os
 
 # Configure basic logging first
 logging.basicConfig(
@@ -22,8 +23,19 @@ logging.basicConfig(
     ]
 )
 
-class TestConfig(BaseConfig):
-    """Test configuration class that overrides paths for testing"""
+class TestConfig:
+    """Test configuration class for the Dash app"""
+    def __init__(self):
+        self.output_dir = Path('test_data/output')
+        self.max_word_count = 50  # Maximum number of words to show in abbreviated messages
+        self.chat_log_path = self.output_dir / 'chat_log_test.md'
+        self.journal_entries_path = self.output_dir / 'journal_entries_annotated.csv'
+        self.suggested_questions = [
+            "How was your day?",
+            "What did you learn today?",
+            "What are your goals for tomorrow?"
+        ]
+        
     def load_config(self) -> None:
         """Override config to use test data directory"""
         config = {
@@ -39,11 +51,21 @@ class TestConfig(BaseConfig):
         self.api_cache_dir = Path(config.get('api_cache_dir', 'test_data/api_cache'))
         self.min_process_interval = config.get('min_process_interval', 0)
         
-        # For testing, we'll use a mock API key
-        self.openai_api_key = 'test-api-key'
+        # Use actual API key from environment
+        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
+        if not self.openai_api_key:
+            logging.warning("No OpenAI API key found in environment variables")
         
         # Create all necessary directories
         self.setup_directories()
+        
+    def get_chat_log_path(self) -> Path:
+        """Override to use test chat log"""
+        return self.chat_log_path
+        
+    def get_todays_chat_log(self) -> str:
+        """Override to return empty string, preventing chat history from being loaded"""
+        return ""
 
 def set_test_date(df: pd.DataFrame) -> None:
     """Set today's date to match the latest date in test data"""
@@ -54,10 +76,19 @@ def set_test_date(df: pd.DataFrame) -> None:
         logging.info(f"Set test date to: {latest_date.strftime('%Y-%m-%d')}")
 
 def create_demo_layout(state):
-    """Create the demo dashboard layout"""
-    layout = create_layout(state)
-    # Replace the title with the demo version
-    layout.children[0].children[0].children[0] = html.H1("Journaling with AI (demo)", className="mb-0")
+    """Create the demo dashboard layout without chat history"""
+    # Get the base layout
+    base_layout = create_layout(state)
+    
+    # Create a new layout with just the main content, excluding chat history (children[0])
+    layout = html.Div([
+        # Main content from base layout (excluding chat row which is children[0])
+        html.Div([
+            base_layout.children[1] if len(base_layout.children) > 1 else None,  # Filters row
+            base_layout.children[2] if len(base_layout.children) > 2 else None,  # Timeline row
+            base_layout.children[3] if len(base_layout.children) > 3 else None,  # Table row
+        ])
+    ])
     return layout
 
 def main():

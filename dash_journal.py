@@ -406,7 +406,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
         end_date = None
 
     # Get today's chat history for initial load
-    chat_log = get_todays_chat_log()
+    chat_log = get_todays_chat_log(state.config)
     
     # Prepare initial messages
     initial_messages = []
@@ -795,7 +795,7 @@ def handle_chat_message(n_clicks, n_submit, *args):
     chat_history = create_chat_history(existing_messages, current_time)
     
     # Get response from agent using the complete dataset from state
-    response_data = get_chat_response(message, state.df, chat_history)
+    response_data = get_chat_response(message, state.df, chat_history, state.config)
     ai_response = response_data['response']
     chat_log = response_data['chat_log']
     
@@ -971,6 +971,9 @@ def main() -> None:
     args = parser.parse_args()
 
     signal.signal(signal.SIGTSTP, handle_sigtstp)
+    
+    # Set app title
+    app.title = "Journal Dashboard"
     
     background_thread = threading.Thread(
         target=background_processor,
