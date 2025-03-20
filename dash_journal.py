@@ -405,15 +405,13 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
     # Format time for display (HH:MM)
     time_str = timestamp.strftime("%H:%M")
     
-    is_long = len(content) > 100 and not is_latest
-    display_content = content if not is_long else content[:100]
-    
+    # Always show full content initially
     message_content = [
         html.Div([
             html.Strong("You: " if is_user else "Assistant: "),
             html.Div(
                 [
-                    html.Span(display_content),
+                    html.Span(content),
                     html.Button(
                         "...",
                         id={'type': 'expand-button', 'index': message_id},
@@ -424,7 +422,7 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
                             'color': '#0d6efd',
                             'cursor': 'pointer',
                             'padding': '0 4px',
-                            'display': 'inline' if is_long else 'none'
+                            'display': 'inline'
                         }
                     )
                 ],
@@ -448,14 +446,13 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
     ]
     
     # Store the full content in a hidden div
-    if is_long:
-        message_content.append(
-            html.Div(
-                content,
-                id={'type': 'full-content', 'index': message_id},
-                style={'display': 'none'}
-            )
+    message_content.append(
+        html.Div(
+            content,
+            id={'type': 'full-content', 'index': message_id},
+            style={'display': 'none'}
         )
+    )
     
     return dbc.Alert(
         message_content,
