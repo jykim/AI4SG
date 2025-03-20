@@ -12,6 +12,7 @@ openai_api_key: ""  # Your OpenAI API key (should be set via environment variabl
 # Processing Settings
 min_process_interval: 600  # Minimum seconds between processing runs (10 minutes)
 max_entries_for_prompt: 20  # Maximum number of recent entries to include in agent prompt
+max_word_count: 30  # Maximum number of words to show before truncating chat messages
 
 suggested_questions:
   - "마무리 할 일이 있나?"

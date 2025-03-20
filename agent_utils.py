@@ -220,7 +220,6 @@ def save_chat_log(
 
 **Assistant**: {ai_response}
 
----
 """
     
     # Append to the log file

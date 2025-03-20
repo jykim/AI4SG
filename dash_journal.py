@@ -58,6 +58,7 @@ class Config:
                 'api_cache_dir': 'api_cache',
                 'min_process_interval': 600,
                 'max_entries_for_prompt': 10,
+                'max_word_count': 30,
                 'suggested_questions': [
                     "What's the status so far?",
                     "What should I do next?",
@@ -71,6 +72,7 @@ class Config:
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
         self.min_process_interval = config.get('min_process_interval', 600)
         self.max_entries_for_prompt = config.get('max_entries_for_prompt', 10)
+        self.max_word_count = config.get('max_word_count', 30)
         self.suggested_questions = config.get('suggested_questions', [
             "What's the status so far?",
             "What should I do next?",
@@ -407,13 +409,18 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
     # Format time for display (HH:MM)
     time_str = timestamp.strftime("%H:%M")
     
-    # Always show full content initially
+    # Split content into words and check if it needs truncation
+    words = content_str.split()
+    is_long = len(words) > config.max_word_count
+    display_content = ' '.join(words[:config.max_word_count]) if is_long else content_str
+    
+    # Create message content with conditional expand button
     message_content = [
         html.Div([
             html.Strong("You: " if is_user else "Assistant: "),
             html.Div(
                 [
-                    html.Span(content),
+                    html.Span(display_content),
                     html.Button(
                         "...",
                         id={'type': 'expand-button', 'index': message_id},
@@ -424,7 +431,7 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
                             'color': '#0d6efd',
                             'cursor': 'pointer',
                             'padding': '0 4px',
-                            'display': 'inline'
+                            'display': 'inline' if is_long else 'none'
                         }
                     )
                 ],
@@ -450,7 +457,7 @@ def format_chat_message(content, is_user=False, is_latest=False, timestamp=None)
     # Store the full content in a hidden div
     message_content.append(
         html.Div(
-            content,
+            content_str,
             id={'type': 'full-content', 'index': message_id},
             style={'display': 'none'}
         )
