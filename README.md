@@ -1,8 +1,14 @@
-# AI4SG - AI-Powered Journal Analysis
+# AI for Self-growth 
+
+## AI-Powered Journal Analysis
 
 A dashboard application that processes and visualizes journal entries with AI-powered semantic analysis. The system extracts entries from markdown files, adds semantic tags using GPT-4, and provides an interactive dashboard for exploration.
 
 ![Screenshot of Dashboard](screenshot.jpg)
+
+## AI-Powered Reading List
+
+TBA
 
 ## Features
 
