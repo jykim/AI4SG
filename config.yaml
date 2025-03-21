@@ -5,6 +5,7 @@ input_dir: "input"  # Directory containing raw journal files
 output_dir: "output"  # Directory for processed files and dashboard output
 api_cache_dir: "api_cache"  # Directory for caching API responses
 journal_dir: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal"  # Directory containing journal markdown files
+reading_dir: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Reading"  # Directory containing reading markdown files
 
 # API Settings
 openai_api_key: ""  # Your OpenAI API key (should be set via environment variable)
