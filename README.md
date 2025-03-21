@@ -2,7 +2,7 @@
 
 ## AI-Powered Journal Analysis
 
-A dashboard application that processes and visualizes journal entries with AI-powered semantic analysis. The system extracts entries from markdown files, adds semantic tags using GPT-4, and provides an interactive dashboard for exploration.
+A dash-based application that processes and visualizes journal entries with AI-powered semantic analysis. The system extracts daily journal entries from markdown files, adds semantic tags using GPT-4, and provides an interactive dashboard for exploration.
 
 ![Screenshot of Dashboard](screenshot.jpg)
 
@@ -85,6 +85,24 @@ python annotate_journal.py --input journal_entries.csv
 - **Date Range**: Filter entries by date
 - **Auto-Update**: Dashboard refreshes automatically when new entries are found
 - **Manual Refresh**: Press Ctrl+Z to force a refresh of entries
+
+### Chat and Agent Features
+
+- **Interactive Chat**: Engage with an AI assistant to analyze your journal entries
+  - Ask questions about patterns and insights
+  - Get personalized recommendations
+  - Explore emotional trends and themes
+
+- **Agent Mode**: Enhanced analysis capabilities
+  - Access to full journal context
+  - Code-aware responses for technical entries
+  - Deep search across historical entries
+  - Contextual understanding of your personal goals and progress
+
+- **Quick Select Questions**: Pre-configured prompts for common inquiries
+  - Status updates
+  - Next action recommendations
+  - Reflection prompts
 
 ## Configuration
 
