@@ -9,12 +9,14 @@ from dash import html, dcc, dash_table
 import pandas as pd
 from dash.dependencies import Input, Output, State
 import plotly.express as px
+import plotly.graph_objects as go
 from flask import send_file
 import os
 import urllib.parse
 import re
 import webbrowser
 import csv
+from datetime import datetime, timedelta
 
 # Initialize the Dash app
 app = dash.Dash(__name__)
@@ -24,6 +26,107 @@ app.server.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # Constants for encodings
 DEFAULT_ENCODINGS = ['utf-8', 'cp949', 'euc-kr']  # List of default encodings to try
+
+# Color mapping for sources
+SOURCE_COLORS = {
+    'reader': '#4CAF50',     # Green
+    'ibooks': '#2196F3',     # Blue
+    'kindle': '#FF9800',     # Orange
+    'medium': '#9C27B0',     # Purple
+    'instapaper': '#03A9F4', # Light Blue
+    'pocket': '#E91E63',     # Pink
+    'Other': '#FFEEAD'       # Light Yellow for any other sources
+}
+
+def create_timeline_figure(df: pd.DataFrame) -> go.Figure:
+    """Create the timeline visualization"""
+    if df is None or df.empty:
+        return {}
+        
+    # Create a copy of the DataFrame to avoid the warning
+    df = df.copy()
+    
+    # Convert date to datetime for proper grouping and remove rows with NaT dates
+    df.loc[:, 'date'] = pd.to_datetime(df['date'])
+    df = df.dropna(subset=['date'])
+    
+    # Filter to show only last 60 days
+    last_60_days = pd.Timestamp.now() - pd.Timedelta(days=60)
+    df = df[df['date'] >= last_60_days]
+    
+    if df.empty:
+        return {}
+    
+    # Group entries by date and calculate normalized positions within each date
+    df.loc[:, 'Entry_Order'] = df.groupby('date').cumcount()
+    df.loc[:, 'Entries_Per_Date'] = df.groupby('date')['Entry_Order'].transform('count')
+    # Reverse the y-axis ordering so newer entries are at the top
+    df.loc[:, 'Y_Normalized'] = 100 - (df['Entry_Order'] / df['Entries_Per_Date']) * 100
+
+    fig = go.Figure()
+
+    # Add vertical shade for today's date
+    today = pd.Timestamp.now().normalize()
+    fig.add_vrect(
+        x0=today,
+        x1=today + pd.Timedelta(days=1),
+        fillcolor="rgba(200, 200, 200, 0.2)",
+        line_width=0,
+        layer="below"
+    )
+
+    # Add scatter points for each reading entry
+    for idx, row in df.iterrows():
+        # Create hover text
+        hover_text = f"Date: {row['date'].strftime('%Y-%m-%d')}<br>"
+        hover_text += f"Title: {row['title']}<br>"
+        hover_text += f"Author: {row['author'] if pd.notna(row['author']) else 'Unknown'}<br>"
+        hover_text += f"Source: {row['source'] if pd.notna(row['source']) else 'Unknown'}"
+        
+        # Get color from source
+        color = SOURCE_COLORS.get(row['source'], '#FFEEAD') if pd.notna(row['source']) else '#FFEEAD'  # Default to 'Other' color
+        
+        # Check if this is today's entry
+        is_today = row['date'].date() == pd.Timestamp.now().date()
+        
+        fig.add_trace(go.Scatter(
+            x=[row['date']],
+            y=[row['Y_Normalized']],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=color,
+                line=dict(
+                    color='#2c5282' if is_today else 'black',
+                    width=3 if is_today else 1
+                )
+            ),
+            text=hover_text,
+            hoverinfo='text',
+            showlegend=False,
+            customdata=[row['title']]  # Add title as custom data for click handling
+        ))
+
+    # Update layout
+    fig.update_layout(
+        height=180,
+        margin=dict(l=20, r=20, t=10, b=10),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(
+            gridcolor='lightgray',
+            showgrid=True,
+            zeroline=False,
+            range=[last_60_days, today + pd.Timedelta(days=1)]  # Set x-axis range to last 60 days
+        ),
+        yaxis=dict(
+            gridcolor='lightgray',
+            showgrid=True,
+            zeroline=False,
+            range=[0, 110]
+        )
+    )
+    return fig
 
 # Load and prepare data
 def load_library_data():
@@ -87,6 +190,9 @@ def save_rating(file_path, rating):
 
 # Initialize data
 df = load_library_data()
+
+# Get the index of the latest entry (first row since df is sorted by date descending)
+latest_entry_index = 0 if not df.empty else None
 
 def read_book_content(file_path, fallback_encoding='cp949'):
     """
@@ -261,6 +367,15 @@ app.layout = html.Div([
                 'backgroundColor': 'white',
                 'borderBottom': '1px solid #ddd'
             }),
+            # Timeline visualization
+            html.Div([
+                dcc.Graph(
+                    id='timeline-graph',
+                    figure=create_timeline_figure(df),
+                    clickData=None,
+                    style={'height': '180px'}
+                )
+            ], style={'margin': '10px'}),
             # DataTable
             html.Div([
                 dash_table.DataTable(
@@ -275,8 +390,9 @@ app.layout = html.Div([
                         {'name': 'Rating', 'id': 'rating', 'type': 'text'},
                     ],
                     data=df.to_dict('records'),
+                    active_cell={'row': latest_entry_index, 'column': 0} if latest_entry_index is not None else None,
                     style_table={
-                        'height': 'calc(100vh - 200px)',  # Adjusted to make room for info panel
+                        'height': 'calc(100vh - 400px)',  # Adjusted to make room for timeline and info panel
                         'overflowY': 'auto',
                         'overflowX': 'auto',
                     },
@@ -309,6 +425,15 @@ app.layout = html.Div([
                             'if': {'row_index': 'odd'},
                             'backgroundColor': '#f9f9f9'
                         }
+                    ] + [
+                        {
+                            'if': {
+                                'filter_query': f'{{source}} = "{source}"',
+                                'column_id': 'source'
+                            },
+                            'backgroundColor': SOURCE_COLORS.get(source, '#FFEEAD')
+                        }
+                        for source in df['source'].unique() if source
                     ],
                     virtualization=True,
                     page_action='none',
@@ -585,41 +710,18 @@ app.layout = html.Div([
     })
 ])
 
-# Callback Definitions
+# Update the callbacks
 @app.callback(
-    Output('book-table', 'data'),
+    [Output('book-table', 'data'),
+     Output('timeline-graph', 'figure')],
     [Input('genre-filter', 'value'),
      Input('rating-filter', 'value'),
-     Input('rating-update-trigger', 'data'),
      Input('text-filter', 'value')]
 )
-def update_table(selected_source, selected_ratings, rating_trigger, text_filter):
-    """
-    Filter the book table based on source, rating selection, and text search.
-    
-    Features:
-    1. Show all books if 'All Sources' selected
-    2. Filter by specific source if selected
-    3. Filter by selected ratings (if any)
-    4. Filter by text search in title and author fields
-    5. Preserve sort order within filtered results
-    6. Refresh data when ratings change
-    
-    Args:
-        selected_source: Source to filter by
-        selected_ratings: List of ratings to filter by
-        rating_trigger: Trigger to refresh table data
-        text_filter: Text to search in title and author fields
-        
-    Returns:
-        Dictionary of filtered book records
-    """
-    # Reload the data to get fresh ratings
-    global df
-    df = load_library_data()
-    
+def update_table_and_timeline(selected_source, selected_ratings, search_text):
+    """Update both the table and timeline based on selected filters"""
     if df is None or df.empty:
-        return []
+        return [], {}
     
     filtered_df = df.copy()
     
@@ -635,51 +737,39 @@ def update_table(selected_source, selected_ratings, rating_trigger, text_filter)
         mask = filtered_df['full_path'].apply(lambda x: ratings.get(x, 0) in selected_ratings)
         filtered_df = filtered_df[mask]
     
-    # Apply text filter
-    if text_filter:
-        # Convert text filter to lowercase for case-insensitive search
-        text_filter = text_filter.lower()
-        # Create mask for title and author matches
-        title_mask = filtered_df['title'].str.lower().str.contains(text_filter, na=False)
-        author_mask = filtered_df['author'].str.lower().str.contains(text_filter, na=False)
-        # Combine masks
-        filtered_df = filtered_df[title_mask | author_mask]
+    # Apply text search filter if search text is provided
+    if search_text and search_text.strip():
+        search_text = search_text.lower().strip()
+        search_mask = (
+            filtered_df['title'].str.lower().str.contains(search_text, na=False) |
+            filtered_df['author'].str.lower().str.contains(search_text, na=False)
+        )
+        filtered_df = filtered_df[search_mask]
     
-    return filtered_df.to_dict('records')
+    return filtered_df.to_dict('records'), create_timeline_figure(filtered_df)
 
+# Update the callbacks to handle both table selection and timeline clicks
 @app.callback(
     [Output('book-content', 'children'),
      Output('selected-book-title', 'children'),
-     Output('scroll-reset-trigger', 'data')],
+     Output('book-table', 'active_cell', allow_duplicate=True),
+     Output('selected-book-info', 'children', allow_duplicate=True),
+     Output('google-search-link', 'href', allow_duplicate=True)],
     [Input('book-table', 'active_cell'),
+     Input('timeline-graph', 'clickData'),
      Input('format-sentences-button', 'n_clicks')],
     [State('book-table', 'data'),
-     State('book-content', 'children'),
-     State('scroll-reset-trigger', 'data')]
+     State('book-content', 'children')],
+    prevent_initial_call=True
 )
-def update_book_content_and_format(active_cell, n_clicks, data, current_content, scroll_trigger):
-    """
-    Handle book content loading and text formatting.
+def update_content_and_info(active_cell, clickData, n_clicks, data, current_content):
+    """Handle content updates and info updates from both table selection and timeline clicks"""
+    if not data:
+        return get_welcome_message(), "Choose a book!", None, "No book selected", "#"
     
-    Features:
-    1. Load new book content when selection changes
-    2. Apply sentence formatting when requested
-    3. Reset scroll position on new selection
-    4. Apply basic markdown formatting
-    
-    Args:
-        active_cell: Currently selected table cell
-        n_clicks: Format button click count
-        data: Current table data
-        current_content: Current text content
-        scroll_trigger: Scroll position reset trigger
-        
-    Returns:
-        Tuple of (content, title, scroll_trigger)
-    """
     ctx = dash.callback_context
-    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+    
     # Handle sentence formatting
     if trigger_id == 'format-sentences-button' and current_content:
         sentences = re.split(r'([.!?][\s\n]+)', current_content)
@@ -688,26 +778,45 @@ def update_book_content_and_format(active_cell, n_clicks, data, current_content,
             formatted_text += sentences[i] + sentences[i+1] + '\n'
         if len(sentences) % 2:
             formatted_text += sentences[-1]
-        return formatted_text, dash.no_update, scroll_trigger
+        return formatted_text, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-    # Handle book content loading
-    if active_cell:  # New book selected
+    # Handle timeline clicks
+    if trigger_id == 'timeline-graph' and clickData:
+        clicked_title = clickData['points'][0]['customdata'][0]
+        # Find the matching row in the table
+        for i, row in enumerate(data):
+            if row['title'] == clicked_title:
+                active_cell = {'row': i, 'column': 0}
+                break
+    
+    # Handle book content loading (from either table selection or timeline click)
+    if active_cell is not None:
         row = data[active_cell['row']]
         current_file['path'] = df[df['title'] == row['title']]['full_path'].iloc[0]
         title = row['title']
-        scroll_trigger += 1
-    elif current_file['path']:  # Encoding changed for current book
-        title = df[df['full_path'] == current_file['path']]['title'].iloc[0]
-    else:
-        return get_welcome_message(), "Choose a book!", scroll_trigger
-
-    content, error, used_encoding = read_book_content(current_file['path'], 'cp949')
-    if error:
-        return error, title, scroll_trigger
+        author = row['author']
+        source = row['source']
+        date = row['date']
+        size = f"{row['size']} KB"
+        
+        # Create info text
+        info_text = f"Date: {date} | Title: {title} | Author: {author} | Source: {source} | Size: {size}"
+        
+        # Create Google search URL
+        search_query = f"{title}"
+        if pd.notna(author):
+            search_query += f" {author}"
+        google_url = f"https://www.google.com/search?q={urllib.parse.quote(search_query)}"
+        
+        content, error, used_encoding = read_book_content(current_file['path'], 'cp949')
+        if error:
+            return error, title, active_cell, info_text, google_url
+        
+        # Apply markdown formatting
+        formatted_content = format_markdown(content) if content else "Failed to read file content"
+        return formatted_content, title, active_cell, info_text, google_url
     
-    # Apply markdown formatting
-    formatted_content = format_markdown(content) if content else "Failed to read file content"
-    return formatted_content, title, scroll_trigger
+    return get_welcome_message(), "Choose a book!", None, "No book selected", "#"
 
 def get_welcome_message():
     """Return the ASCII art welcome message."""
@@ -816,49 +925,6 @@ def download(filename):
     # Find the full path of the file
     file_path = df[df['full_path'].str.endswith(filename)]['full_path'].iloc[0]
     return send_file(file_path, as_attachment=True)
-
-# Add callback for updating book info and Google search link
-@app.callback(
-    [Output('selected-book-info', 'children'),
-     Output('google-search-link', 'href')],
-    [Input('book-table', 'active_cell')],
-    [State('book-table', 'data')]
-)
-def update_book_info(active_cell, data):
-    """
-    Update book information panel and search link.
-    
-    Features:
-    1. Display book metadata (title, author, source)
-    2. Generate Google search URL
-    3. Handle missing author information
-    
-    Args:
-        active_cell: Currently selected table cell
-        data: Current table data
-        
-    Returns:
-        Tuple of (info_text, google_url)
-    """
-    if active_cell:
-        row = data[active_cell['row']]
-        title = row['title']
-        author = row['author']
-        source = row['source']
-        date = row['date']
-        size = f"{row['size']} KB"  # Add KB suffix
-        
-        # Create info text
-        info_text = f"Date: {date} | Title: {title} | Author: {author} | Source: {source} | Size: {size}"
-        
-        # Create Google search URL - only include author if not null
-        search_query = f"{title}"
-        if pd.notna(author):
-            search_query += f" {author}"
-        google_url = f"https://www.google.com/search?q={urllib.parse.quote(search_query)}"
-        
-        return info_text, google_url
-    return "No book selected", "#"
 
 # Add callback for font size control
 @app.callback(
