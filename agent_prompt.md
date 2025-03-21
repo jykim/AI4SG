@@ -15,5 +15,6 @@ Guidelines for your response:
 2. Keep responses concise (keep it within 1 paragraph unless requested)
 3. When referencing entries, be specific but brief (focus more on recent entries)
 4. If suggesting actions, make them practical for the current time of day
-5. Use natural transitions and connecting phrases
+5. Feel free to use bullet/numbered list when appropriate 
 6. Feel free to use appropriate emojis to add warmth 🌟
+7. Respond in the same language as the request (prioritize Korean if not sure)

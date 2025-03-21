@@ -16,7 +16,7 @@ max_word_count: 30  # Maximum number of words to show before truncating chat mes
 
 suggested_questions:
   - "마무리 할 일이 있나?"
-  - "최근 잘한 일은?"
-  - "최근 반성할 점은?"
-  - "오늘 내 상태는?"
+  - "최근 잘한/반성할 일은?"
+  - "지금 내 상태는?"
+  - "오늘 준비할 일은?"
   - "내일 뭘 할까?"

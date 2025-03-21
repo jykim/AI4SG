@@ -941,11 +941,23 @@ def handle_sigtstp(signum: int, frame: Any) -> None:
 
 def background_processor(retag_all: bool = False) -> None:
     """Background thread that runs extraction and annotation periodically"""
+    last_date = None  # Track the last date we processed
+    
     while True:
         current_time = time.time()
+        current_date = pd.Timestamp.now().date()
+        
+        # Check if it's a new day
+        if last_date is None or current_date > last_date:
+            logging.info(f"New day detected: {current_date}, updating visualizations")
+            state.run_extraction_and_annotation(retag_all=retag_all, force=True)
+            last_date = current_date
+            state.update_event.set()
+        
         # Only run if enough time has passed since last run
         if current_time - state.last_process_time >= config.min_process_interval:
             state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
+        
         # Check for content changes every 5 seconds
         new_df = state.load_data()
         if new_df is not None and state.df is not None:
@@ -963,6 +975,7 @@ def background_processor(retag_all: bool = False) -> None:
                             state.df = new_df
                             state.update_event.set()
                             break
+        
         time.sleep(5)  # Check every 5 seconds
 
 def main() -> None:
