@@ -44,6 +44,7 @@ export OPENAI_API_KEY=your_api_key_here
      input_dir: "input"  # Directory for raw journal files
      output_dir: "output"  # Directory for processed files
      api_cache_dir: "api_cache"  # Directory for API response cache
+     agent_cache_dir: "agent_cache"  # Directory for caching agent responses
      journal_dir: "~/path/to/your/journal"  # Your journal directory
      ```
 
@@ -88,6 +89,7 @@ The application is configured through `config.yaml`:
 input_dir: "input"  # Directory containing raw journal files
 output_dir: "output"  # Directory for processed files
 api_cache_dir: "api_cache"  # Directory for caching API responses
+agent_cache_dir: "agent_cache"  # Directory for caching agent responses
 journal_dir: "~/path/to/your/journal"  # Your journal directory
 
 # API Settings
@@ -95,7 +97,79 @@ openai_api_key: ""  # Set via environment variable
 
 # Processing Settings
 min_process_interval: 600  # Minimum seconds between processing runs
+max_entries_for_prompt: 10  # Maximum number of entries to include in GPT-4 prompts
+max_word_count: 30  # Maximum words to show in abbreviated messages
+
+# UI Settings
+suggested_questions:  # Questions shown as quick-select buttons
+  - "What's the status so far?"
+  - "What should I do next?"
+  - "Anything to reflect on?"
 ```
+
+### Configuration Options
+
+- **Directory Settings**:
+  - `input_dir`: Directory containing raw journal markdown files
+  - `output_dir`: Directory for processed CSV files and chat logs
+  - `api_cache_dir`: Directory for caching GPT-4 API responses
+  - `agent_cache_dir`: Directory for caching agent conversation responses
+  - `journal_dir`: Path to your main journal directory
+
+- **API Settings**:
+  - `openai_api_key`: Your OpenAI API key (set via environment variable)
+
+- **Processing Settings**:
+  - `min_process_interval`: Minimum time between automatic processing runs (seconds)
+  - `max_entries_for_prompt`: Maximum number of entries to include in GPT-4 prompts
+  - `max_word_count`: Maximum words to show in abbreviated messages
+
+- **UI Settings**:
+  - `suggested_questions`: List of questions shown as quick-select buttons in the chat interface
+
+## Testing
+
+The project includes a test environment for development and testing purposes. The test dashboard runs on a separate port and uses test data directories.
+
+### Test Data Setup
+
+1. Create test data directories:
+```bash
+mkdir -p test_data/{output,api_cache,agent_cache}
+```
+
+2. Run the test dashboard:
+```bash
+python test_dash_journal.py
+```
+
+The test dashboard will be available at http://127.0.0.1:8049/
+
+### Test Environment Features
+
+- **Separate Port**: Runs on port 8049 to avoid conflicts with the main dashboard
+- **Test Data Directories**: Uses isolated directories under `test_data/`:
+  - `test_data/output/`: Processed journal entries and chat logs
+  - `test_data/api_cache/`: Cached API responses
+  - `test_data/agent_cache/`: Cached agent responses
+- **No Chat History**: Test environment starts with a clean chat history
+- **Demo Mode**: Includes "(demo)" suffix in the dashboard title
+- **Test Configuration**: Uses `TestConfig` class with test-specific settings
+
+### Test Data Processing
+
+The test environment uses the same processing pipeline as the main application but with test-specific configurations:
+
+1. **Extraction**: Processes test journal entries from `input/` directory
+2. **Annotation**: Adds semantic tags using GPT-4
+3. **Dashboard**: Displays processed entries in the test interface
+
+### Development Workflow
+
+1. Make changes to the codebase
+2. Test changes using the test dashboard
+3. Verify functionality in the main dashboard
+4. Commit changes when ready
 
 ## Project Structure
 
