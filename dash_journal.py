@@ -65,6 +65,7 @@ class Config:
                 'input_dir': 'input',
                 'output_dir': 'output',
                 'api_cache_dir': 'api_cache',
+                'agent_cache_dir': 'agent_cache',
                 'min_process_interval': 600,
                 'max_entries_for_prompt': 10,
                 'max_word_count': 30,
@@ -79,6 +80,7 @@ class Config:
         self.input_dir = Path(config.get('input_dir', 'input'))
         self.output_dir = Path(config.get('output_dir', 'output'))
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
+        self.agent_cache_dir = Path(config.get('agent_cache_dir', 'agent_cache'))
         self.min_process_interval = config.get('min_process_interval', 600)
         self.max_entries_for_prompt = config.get('max_entries_for_prompt', 10)
         self.max_word_count = config.get('max_word_count', 30)
@@ -93,7 +95,7 @@ class Config:
 
     def setup_directories(self) -> None:
         """Create necessary directories if they don't exist"""
-        for directory in [self.input_dir, self.output_dir, self.api_cache_dir]:
+        for directory in [self.input_dir, self.output_dir, self.api_cache_dir, self.agent_cache_dir]:
             directory.mkdir(exist_ok=True)
 
 # Initialize configuration

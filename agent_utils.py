@@ -10,6 +10,7 @@ import os
 import openai
 import pandas as pd
 import logging
+import traceback
 from pathlib import Path
 import yaml
 from datetime import datetime, timedelta
@@ -438,7 +439,7 @@ def get_chat_response(
         save_to_cache(f"error_{cache_key}", {
             'content': error_response,
             'error': str(e),
-            'traceback': logging.format_exc(),
+            'traceback': traceback.format_exc(),
             'request': {
                 'messages': messages,
                 'model': 'gpt-4-1106-preview',
