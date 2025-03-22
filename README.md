@@ -23,6 +23,9 @@ Features:
 - **Responsive Layout**: Clean, adjustable reading interface with customizable font size and margins
 - **Quick Actions**: One-click Google search for books and articles
 
+![Screenshot of Dashboard](screenshot_reading.jpg)
+
+
 ## Features
 
 - **Journal Entry Extraction**: Processes markdown files from Obsidian or similar note-taking apps
