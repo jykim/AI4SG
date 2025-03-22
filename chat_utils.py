@@ -79,11 +79,6 @@ def format_chat_message(content: str, is_user: bool = False, is_latest: bool = F
     """Format a chat message with proper styling and truncation."""
     import time
     
-    # Generate a unique ID for the message using timestamp, content hash, and random component
-    content_str = str(content) if isinstance(content, list) else content
-    random_component = hash(f"{content_str}{time.time()}{is_user}")
-    message_id = f"msg-{int(time.time() * 1000)}-{abs(random_component) % 100000}"
-    
     # Use provided timestamp or current time
     if timestamp is None:
         timestamp = datetime.now()
@@ -100,6 +95,11 @@ def format_chat_message(content: str, is_user: bool = False, is_latest: bool = F
                 timestamp = datetime.now()
         except Exception:
             timestamp = datetime.now()
+    
+    # Generate a unique ID for the message using timestamp and content hash
+    content_str = str(content) if isinstance(content, list) else content
+    random_component = hash(f"{content_str}{timestamp.strftime('%Y%m%d%H%M%S')}{is_user}")
+    message_id = f"msg-{timestamp.strftime('%Y%m%d%H%M%S')}-{abs(random_component) % 100000}"
     
     # Format time for display (HH:MM)
     time_str = timestamp.strftime("%H:%M")
@@ -148,6 +148,40 @@ def format_chat_message(content: str, is_user: bool = False, is_latest: bool = F
             }
         )
     ]
+    
+    # Add feedback buttons for AI responses
+    if not is_user:
+        feedback_buttons = html.Div([
+            html.Button(
+                "👍",
+                id={'type': 'thumbs-up', 'index': message_id},
+                n_clicks=0,
+                style={
+                    'background': 'none',
+                    'border': 'none',
+                    'cursor': 'pointer',
+                    'padding': '0 4px',
+                    'font-size': '1.2em',
+                    'opacity': '0.7',
+                    'transition': 'opacity 0.2s'
+                }
+            ),
+            html.Button(
+                "👎",
+                id={'type': 'thumbs-down', 'index': message_id},
+                n_clicks=0,
+                style={
+                    'background': 'none',
+                    'border': 'none',
+                    'cursor': 'pointer',
+                    'padding': '0 4px',
+                    'font-size': '1.2em',
+                    'opacity': '0.7',
+                    'transition': 'opacity 0.2s'
+                }
+            )
+        ], style={'margin-top': '4px', 'text-align': 'left'})
+        message_content.append(feedback_buttons)
     
     # Store the full content in a hidden div
     message_content.append(

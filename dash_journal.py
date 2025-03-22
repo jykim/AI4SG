@@ -25,6 +25,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
+import json
 
 # Third-party imports
 import dash
@@ -36,7 +37,7 @@ import plotly.graph_objects as go
 import yaml
 
 # Local imports
-from agent_utils import get_chat_response, get_todays_chat_log
+from agent_utils import get_chat_response, get_todays_chat_log, Config
 from chat_utils import (
     parse_message_timestamp,
     extract_message_content,
@@ -998,6 +999,70 @@ def main() -> None:
     background_thread.start()
 
     app.run_server(debug=False, port=8050)
+
+def save_feedback(message_id: str, feedback: str, config: Optional[Config] = None) -> None:
+    """Save feedback for a chat message to CSV file.
+    
+    Args:
+        message_id: Unique identifier for the message
+        feedback: Type of feedback ('thumbs-up' or 'thumbs-down')
+        config: Optional Config object
+    """
+    if config is None:
+        config = Config()
+    
+    feedback_file = config.output_dir / 'chat_feedback.csv'
+    
+    # Create DataFrame with new feedback
+    new_feedback = pd.DataFrame({
+        'timestamp': [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        'message_id': [message_id],
+        'feedback': [feedback]
+    })
+    
+    try:
+        # Read existing feedback if file exists
+        if feedback_file.exists():
+            existing_feedback = pd.read_csv(feedback_file)
+            # Combine with new feedback
+            feedback_df = pd.concat([existing_feedback, new_feedback], ignore_index=True)
+        else:
+            feedback_df = new_feedback
+        
+        # Save to CSV
+        feedback_df.to_csv(feedback_file, index=False)
+    except Exception as e:
+        logging.error(f"Error saving feedback: {e}")
+
+@app.callback(
+    Output({'type': 'thumbs-up', 'index': MATCH}, 'style'),
+    Output({'type': 'thumbs-down', 'index': MATCH}, 'style'),
+    Input({'type': 'thumbs-up', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'thumbs-down', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True
+)
+def handle_feedback(thumbs_up_clicks, thumbs_down_clicks):
+    """Handle feedback button clicks and update button styles."""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return {}, {}
+    
+    # Get the message ID from the triggered button
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    message_id = json.loads(button_id)['index']
+    
+    # Determine which button was clicked
+    is_thumbs_up = 'thumbs-up' in button_id
+    
+    # Save feedback
+    feedback = 'thumbs-up' if is_thumbs_up else 'thumbs-down'
+    save_feedback(message_id, feedback)
+    
+    # Update button styles
+    if is_thumbs_up:
+        return {'opacity': '1.0'}, {'opacity': '0.3'}
+    else:
+        return {'opacity': '0.3'}, {'opacity': '1.0'}
 
 if __name__ == '__main__':
     main()

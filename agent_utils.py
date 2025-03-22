@@ -213,9 +213,9 @@ def save_chat_log(
     
     chat_log_file = config.output_dir / 'chat_log.md'
     
-    # Format the chat entry
+    # Format the chat entry with second-level timestamp
     chat_entry = f"""
-### Chat Entry - {current_time.strftime("%Y-%m-%d %H:%M")}
+### Chat Entry - {current_time.strftime("%Y-%m-%d %H:%M:%S")}
 
 **User**: {user_query}
 
