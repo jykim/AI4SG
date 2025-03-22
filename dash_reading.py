@@ -4,22 +4,21 @@ A Dash web application for managing and reading text files with encoding support
 Specifically designed for handling Korean text files with various encodings.
 """
 
+import orjson
 import dash
 from dash import html, dcc, dash_table
 import pandas as pd
 from dash.dependencies import Input, Output, State
 import plotly.express as px
 import plotly.graph_objects as go
-from flask import send_file
 import os
 import urllib.parse
 import re
-import webbrowser
 import csv
 from datetime import datetime, timedelta
 
-# Initialize the Dash app
-app = dash.Dash(__name__)
+# Initialize the Dash app with specific orjson settings
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
 # Configuration
 app.server.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -314,29 +313,28 @@ app.layout = html.Div([
         html.Div([
             # Title and Source Filter
             html.Div([
-                html.H2('Reading with AI', 
+                html.H1('Reading with AI', 
                     style={
                         'margin': '0',
                         'padding': '10px',
                         'color': '#2c3e50',
-                        'fontSize': '20px',
+                        'fontSize': '24px',
                         'fontWeight': 'bold',
                         'borderBottom': '1px solid #eee'
                     }
                 ),
                 html.Div([
                     html.Div([
-                        html.Label('Source:', style={'marginRight': '5px', 'fontWeight': 'bold'}),
                         dcc.Dropdown(
                             id='genre-filter',
                             options=[{'label': source, 'value': source} 
                                    for source in df['source'].dropna().unique().tolist()],
                             value='All Sources',
+                            placeholder='Filter Source',
                             style={'width': '100%'}
                         ),
                     ], style={'flex': '1', 'marginRight': '10px'}),
                     html.Div([
-                        html.Label('Rating:', style={'marginRight': '5px', 'fontWeight': 'bold'}),
                         dcc.Dropdown(
                             id='rating-filter',
                             options=[
@@ -346,22 +344,29 @@ app.layout = html.Div([
                             ],
                             value=[],
                             multi=True,
+                            placeholder='Filter Rating',
                             style={'width': '100%'}
                         ),
                     ], style={'flex': '1'}),
                     html.Div([
-                        html.Label('Search:', style={'marginRight': '5px', 'fontWeight': 'bold'}),
                         dcc.Input(
                             id='text-filter',
                             type='text',
                             placeholder='Search title or author...',
-                            style={'width': '100%', 'padding': '5px', 'border': '1px solid #ddd', 'borderRadius': '4px'}
+                            style={
+                                'width': '100%', 
+                                'padding': '5px', 
+                                'border': '1px solid #ddd', 
+                                'borderRadius': '4px',
+                                'height': '22px'  # Adjusted height to 22px
+                            }
                         ),
                     ], style={'flex': '1'})
                 ], style={
                     'display': 'flex',
                     'margin': '10px',
-                    'gap': '10px'
+                    'gap': '10px',
+                    'height': '40px'  # Fixed height for the filter row
                 }),
             ], style={
                 'backgroundColor': 'white',
@@ -392,7 +397,7 @@ app.layout = html.Div([
                     data=df.to_dict('records'),
                     active_cell={'row': latest_entry_index, 'column': 0} if latest_entry_index is not None else None,
                     style_table={
-                        'height': 'calc(100vh - 400px)',  # Adjusted to make room for timeline and info panel
+                        'height': 'calc(100vh - 380px)',  # Adjusted to match the height of the filter row
                         'overflowY': 'auto',
                         'overflowX': 'auto',
                     },
@@ -440,35 +445,35 @@ app.layout = html.Div([
                     fixed_rows={'headers': True},
                     sort_action="native",
                     sort_mode="multi",
-                    filter_action="native",
+                    filter_action="none",
                     row_selectable=False,
-                    cell_selectable=True,
-                    style_filter={
-                        'backgroundColor': 'white',
-                        'fontWeight': 'bold',
-                        'position': 'sticky',
-                        'top': '40px',
-                        'zIndex': 1000
-                    }
+                    cell_selectable=True
                 ),
                 # Book Info Panel
                 html.Div([
                     html.Div([
-                        html.Strong('Selected Book Info:', style={'marginBottom': '5px'}),
                         html.Div([
-                            html.Div(id='selected-book-info'),
+                            html.Strong('Selected Book Info:', style={'marginBottom': '5px'}),
                             html.A(
                                 'Search on Google',
                                 id='google-search-link',
                                 target='_blank',
                                 rel="noopener noreferrer",
                                 style={
-                                    'color': '#2196F3',
+                                    'color': 'white',
                                     'textDecoration': 'none',
-                                    'marginTop': '5px',
-                                    'display': 'inline-block'
+                                    'marginLeft': '10px',
+                                    'padding': '2px 8px',
+                                    'backgroundColor': '#2196F3',
+                                    'borderRadius': '4px',
+                                    'fontSize': '12px',
+                                    'display': 'inline-block',
+                                    'verticalAlign': 'middle'
                                 }
                             )
+                        ], style={'display': 'flex', 'alignItems': 'center'}),
+                        html.Div([
+                            html.Div(id='selected-book-info'),
                         ], style={'marginTop': '5px'})
                     ], style={
                         'padding': '10px',
@@ -483,7 +488,7 @@ app.layout = html.Div([
                 })
             ], style={'flex': '1', 'overflow': 'hidden', 'display': 'flex', 'flexDirection': 'column'})
         ], style={
-            'flex': '0.45',  # Changed to 0.45 for 45%
+            'flex': '0.5',  # Changed from 0.45 to 0.5 for 50%
             'height': '100vh',
             'backgroundColor': 'white',
             'overflow': 'hidden',
@@ -502,56 +507,6 @@ app.layout = html.Div([
                         'fontStyle': 'italic',  # Italic for the placeholder text
                         'fontWeight': 'bold'  # Make the title bold
                     }),
-                    html.A(
-                        html.Button(
-                            '⬇ Download',
-                            style={
-                                'marginLeft': '10px',
-                                'padding': '2px 8px',
-                                'fontSize': '12px',
-                                'backgroundColor': '#4CAF50',
-                                'color': 'white',
-                                'border': 'none',
-                                'borderRadius': '4px',
-                                'cursor': 'pointer'
-                            }
-                        ),
-                        id='download-link',
-                        style={'textDecoration': 'none'},
-                        target='_blank'
-                    ),
-                    html.A(
-                        html.Button(
-                            '↗ New Tab',
-                            style={
-                                'marginLeft': '10px',
-                                'padding': '2px 8px',
-                                'fontSize': '12px',
-                                'backgroundColor': '#FF9800',
-                                'color': 'white',
-                                'border': 'none',
-                                'borderRadius': '4px',
-                                'cursor': 'pointer'
-                            }
-                        ),
-                        id='newtab-link',
-                        style={'textDecoration': 'none'},
-                        target='_blank'
-                    ),
-                    html.Button(
-                        'Formst',
-                        id='format-sentences-button',
-                        style={
-                            'marginLeft': '10px',
-                            'padding': '2px 8px',
-                            'fontSize': '12px',
-                            'backgroundColor': '#2196F3',
-                            'color': 'white',
-                            'border': 'none',
-                            'borderRadius': '4px',
-                            'cursor': 'pointer'
-                        }
-                    ),
                     html.Button(
                         '−',  # Minus sign for smaller text
                         id='decrease-font-button',
@@ -613,8 +568,8 @@ app.layout = html.Div([
                         }
                     ),
                     # Store components for font size and margin
-                    dcc.Store(id='font-size', data=14),
-                    dcc.Store(id='margin-size', data=10),
+                    dcc.Store(id='font-size', data=16),
+                    dcc.Store(id='margin-size', data=40),
                     dcc.Store(id='rating-update-trigger', data=0),
                     # Store to trigger scroll reset
                     dcc.Store(id='scroll-reset-trigger', data=0)
@@ -682,17 +637,18 @@ app.layout = html.Div([
                     'width': 'calc(100% - 20px)',
                     'height': 'calc(100vh - 60px)',  # Adjusted for header
                     'fontFamily': 'monospace',
-                    'fontSize': '14px',
+                    'fontSize': '16px',
                     'padding': '10px',
                     'border': '1px solid #ddd',
                     'borderRadius': '4px',
                     'backgroundColor': '#f8f9fa',
                     'overflowY': 'auto',
-                    'whiteSpace': 'pre-wrap'
+                    'whiteSpace': 'pre-wrap',
+                    'margin': '0 40px'
                 }
             )
         ], style={
-            'flex': '0.55',  # Changed to 0.55 for 55%
+            'flex': '0.5',  # Changed from 0.55 to 0.5 for 50%
             'height': '100vh',
             'backgroundColor': 'white',
             'display': 'flex',
@@ -756,13 +712,12 @@ def update_table_and_timeline(selected_source, selected_ratings, search_text):
      Output('selected-book-info', 'children', allow_duplicate=True),
      Output('google-search-link', 'href', allow_duplicate=True)],
     [Input('book-table', 'active_cell'),
-     Input('timeline-graph', 'clickData'),
-     Input('format-sentences-button', 'n_clicks')],
+     Input('timeline-graph', 'clickData')],
     [State('book-table', 'data'),
      State('book-content', 'children')],
     prevent_initial_call=True
 )
-def update_content_and_info(active_cell, clickData, n_clicks, data, current_content):
+def update_content_and_info(active_cell, clickData, data, current_content):
     """Handle content updates and info updates from both table selection and timeline clicks"""
     if not data:
         return get_welcome_message(), "Choose a book!", None, "No book selected", "#"
@@ -770,16 +725,6 @@ def update_content_and_info(active_cell, clickData, n_clicks, data, current_cont
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
     
-    # Handle sentence formatting
-    if trigger_id == 'format-sentences-button' and current_content:
-        sentences = re.split(r'([.!?][\s\n]+)', current_content)
-        formatted_text = ''
-        for i in range(0, len(sentences)-1, 2):
-            formatted_text += sentences[i] + sentences[i+1] + '\n'
-        if len(sentences) % 2:
-            formatted_text += sentences[-1]
-        return formatted_text, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-
     # Handle timeline clicks
     if trigger_id == 'timeline-graph' and clickData:
         clicked_title = clickData['points'][0]['customdata'][0]
@@ -846,86 +791,6 @@ def get_welcome_message():
 
         """
 
-# Add callback for updating download and new tab links when a book is selected
-@app.callback(
-    [Output('download-link', 'href'),
-     Output('newtab-link', 'href')],
-    [Input('book-table', 'active_cell')],
-    [State('book-table', 'data')]
-)
-def update_links(active_cell, data):
-    """
-    Update download and new tab links for selected book.
-    
-    Features:
-    1. Generate download URL for current file
-    2. Create system file open URL
-    3. Handle no selection case
-    
-    Args:
-        active_cell: Currently selected table cell
-        data: Current table data
-        
-    Returns:
-        Tuple of (download_url, open_url)
-    """
-    if active_cell:
-        row = data[active_cell['row']]
-        file_path = df[df['title'] == row['title']]['full_path'].iloc[0]
-        # Convert the file path to URL-friendly format for download
-        download_url = f"/download/{os.path.basename(file_path)}"
-        # Create open-file URL
-        open_url = f"/open/{os.path.basename(file_path)}"
-        return download_url, open_url
-    return "", ""
-
-# Add route to open file in system default application
-@app.server.route('/open/<path:filename>')
-def open_file(filename):
-    """
-    Open file in system default application.
-    
-    Process:
-    1. Locate file in catalog
-    2. Generate file URL
-    3. Open in default system application
-    
-    Args:
-        filename: Name of file to open
-        
-    Returns:
-        Tuple of (status_message, http_status_code)
-    """
-    try:
-        # Find the full path of the file
-        file_path = df[df['full_path'].str.endswith(filename)]['full_path'].iloc[0]
-        # Open the file using the default system application
-        webbrowser.open(f'file://{file_path}')
-        return "File opened in default application", 200
-    except Exception as e:
-        return str(e), 500
-
-# Add download route to Flask server
-@app.server.route('/download/<path:filename>')
-def download(filename):
-    """
-    Handle file download requests.
-    
-    Process:
-    1. Locate file in catalog
-    2. Send file as attachment
-    3. Handle file not found errors
-    
-    Args:
-        filename: Name of file to download
-        
-    Returns:
-        Flask send_file response
-    """
-    # Find the full path of the file
-    file_path = df[df['full_path'].str.endswith(filename)]['full_path'].iloc[0]
-    return send_file(file_path, as_attachment=True)
-
 # Add callback for font size control
 @app.callback(
     [Output('book-content', 'style'),
@@ -945,7 +810,7 @@ def update_text_style(increase_font_clicks, decrease_font_clicks,
     Update text display style based on user interactions.
     
     Features:
-    1. Font size control (8-24px, 2px steps)
+    1. Font size control (10-26px, 2px steps)  # Updated range
     2. Margin control (0-100px, 10px steps)
     3. Style state persistence
     
@@ -971,15 +836,17 @@ def update_text_style(increase_font_clicks, decrease_font_clicks,
             'borderRadius': '4px',
             'backgroundColor': '#f8f9fa',
             'resize': 'none',
-            'margin': f'0 {current_margin}px'
+            'margin': f'0 {current_margin}px',
+            'whiteSpace': 'pre-wrap',
+            'overflowY': 'auto'
         }, current_font_size, current_margin
     
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
     
-    # Handle font size changes
-    if button_id == 'increase-font-button' and current_font_size < 24:
+    # Handle font size changes with new range
+    if button_id == 'increase-font-button' and current_font_size < 26:  # Increased max size
         current_font_size += 2
-    elif button_id == 'decrease-font-button' and current_font_size > 8:
+    elif button_id == 'decrease-font-button' and current_font_size > 10:  # Increased min size
         current_font_size -= 2
     
     # Handle margin changes
@@ -998,7 +865,9 @@ def update_text_style(increase_font_clicks, decrease_font_clicks,
         'borderRadius': '4px',
         'backgroundColor': '#f8f9fa',
         'resize': 'none',
-        'margin': f'0 {current_margin}px'
+        'margin': f'0 {current_margin}px',
+        'whiteSpace': 'pre-wrap',
+        'overflowY': 'auto'
     }, current_font_size, current_margin
 
 # Add clientside callback to reset scroll position
@@ -1117,4 +986,4 @@ def get_button_style(stars, current_rating, is_first):
 
 # Run the app
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8051) 
+    app.run_server(debug=False, port=8051) 
