@@ -13,7 +13,15 @@ To help with reflection and planning, an AI assistant based on recent journal en
 
 ## AI-Powered Reading List
 
-TBA
+A Dash-based reading interface that processes and visualizes your reading history from various sources (iBooks, Kindle, Medium, Instapaper, Pocket, etc.). The system extracts reading entries and provides an interactive dashboard for exploring and managing your reading history.
+
+Features:
+- **Multi-source Integration**: Supports reading history from various platforms
+- **Interactive Timeline**: Visual representation of reading activity over the past 60 days
+- **Rating System**: Built-in 3-star rating system for books and articles
+- **Search & Filter**: Find entries by title, author, source, or rating
+- **Responsive Layout**: Clean, adjustable reading interface with customizable font size and margins
+- **Quick Actions**: One-click Google search for books and articles
 
 ## Features
 
@@ -23,6 +31,8 @@ TBA
 - **Real-time Updates**: Automatically detects and processes new entries
 - **Search & Filter**: Find entries by date, content, or tags
 - **API Caching**: Optimizes API usage by caching GPT-4 responses
+- **Reading History**: Tracks and visualizes reading activity across multiple platforms
+- **Book Management**: Rate and organize your reading materials
 
 ## Prerequisites
 
@@ -63,12 +73,19 @@ export OPENAI_API_KEY=your_api_key_here
 
 ### Running the Dashboard
 
-Start the dashboard application:
+Start the journal dashboard application:
 ```bash
 python dash_journal.py
 ```
 
-The dashboard will be available at http://127.0.0.1:8050/
+The journal dashboard will be available at http://127.0.0.1:8050/
+
+Start the reading dashboard application:
+```bash
+python dash_reading.py
+```
+
+The reading dashboard will be available at http://127.0.0.1:8051/
 
 ### Manual Processing
 
