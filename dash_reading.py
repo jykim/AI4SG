@@ -16,6 +16,13 @@ import urllib.parse
 import re
 import csv
 from datetime import datetime, timedelta
+import subprocess
+import sys
+import logging
+import random
+
+# Import extraction script functionality
+from extract_reading import Config, index_txt_files, save_to_csv, save_to_markdown
 
 # Initialize the Dash app with specific orjson settings
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -36,6 +43,26 @@ SOURCE_COLORS = {
     'pocket': '#E91E63',     # Pink
     'Other': '#FFEEAD'       # Light Yellow for any other sources
 }
+
+def run_extraction():
+    """Run the extraction script to update reading entries."""
+    try:
+        # Initialize config
+        config = Config()
+        
+        # Run extraction
+        print("Running extraction script to update reading entries...")
+        entries_info = index_txt_files(str(config.reading_dir))
+        
+        # Save results
+        save_to_csv(entries_info)
+        save_to_markdown(entries_info)
+        
+        print(f"Successfully processed {len(entries_info)} reading entries")
+        return True
+    except Exception as e:
+        print(f"Error running extraction script: {str(e)}")
+        return False
 
 def create_timeline_figure(df: pd.DataFrame) -> go.Figure:
     """Create the timeline visualization"""
@@ -127,6 +154,23 @@ def create_timeline_figure(df: pd.DataFrame) -> go.Figure:
     )
     return fig
 
+def get_random_article(df: pd.DataFrame) -> tuple:
+    """
+    Select a random article from the DataFrame.
+    
+    Args:
+        df: DataFrame containing reading entries
+        
+    Returns:
+        Tuple of (row_index, row_data) or (None, None) if no data
+    """
+    if df is None or df.empty:
+        return None, None
+    
+    # Get a random index
+    random_index = random.randint(0, len(df) - 1)
+    return random_index, df.iloc[random_index]
+
 # Load and prepare data
 def load_library_data():
     """Load and sort the library catalog with ratings."""
@@ -192,6 +236,9 @@ df = load_library_data()
 
 # Get the index of the latest entry (first row since df is sorted by date descending)
 latest_entry_index = 0 if not df.empty else None
+
+# Get a random article index
+random_entry_index, random_entry = get_random_article(df)
 
 def read_book_content(file_path, fallback_encoding='cp949'):
     """
@@ -308,6 +355,9 @@ def format_markdown(content):
 
 # Create the layout
 app.layout = html.Div([
+    # Add URL component for pathname tracking
+    dcc.Location(id='url', refresh=False),
+    
     html.Div([
         # Left side panel
         html.Div([
@@ -395,7 +445,7 @@ app.layout = html.Div([
                         {'name': 'Rating', 'id': 'rating', 'type': 'text'},
                     ],
                     data=df.to_dict('records'),
-                    active_cell={'row': latest_entry_index, 'column': 0} if latest_entry_index is not None else None,
+                    active_cell={'row': random_entry_index, 'column': 0} if random_entry_index is not None else None,
                     style_table={
                         'height': 'calc(100vh - 380px)',  # Adjusted to match the height of the filter row
                         'overflowY': 'auto',
@@ -669,15 +719,17 @@ app.layout = html.Div([
 # Update the callbacks
 @app.callback(
     [Output('book-table', 'data'),
-     Output('timeline-graph', 'figure')],
+     Output('timeline-graph', 'figure'),
+     Output('book-table', 'active_cell')],
     [Input('genre-filter', 'value'),
      Input('rating-filter', 'value'),
-     Input('text-filter', 'value')]
+     Input('text-filter', 'value'),
+     Input('url', 'pathname')]  # Add URL pathname as input
 )
-def update_table_and_timeline(selected_source, selected_ratings, search_text):
+def update_table_and_timeline(selected_source, selected_ratings, search_text, pathname):
     """Update both the table and timeline based on selected filters"""
     if df is None or df.empty:
-        return [], {}
+        return [], {}, None
     
     filtered_df = df.copy()
     
@@ -702,7 +754,18 @@ def update_table_and_timeline(selected_source, selected_ratings, search_text):
         )
         filtered_df = filtered_df[search_mask]
     
-    return filtered_df.to_dict('records'), create_timeline_figure(filtered_df)
+    # Determine which cell to activate
+    active_cell = None
+    if pathname == '/':  # If it's the root path (initial load or refresh)
+        # Get a random article from the filtered data
+        random_index, _ = get_random_article(filtered_df)
+        if random_index is not None:
+            active_cell = {'row': random_index, 'column': 0}
+    else:
+        # Keep the latest entry selected for other cases
+        active_cell = {'row': 0, 'column': 0} if not filtered_df.empty else None
+    
+    return filtered_df.to_dict('records'), create_timeline_figure(filtered_df), active_cell
 
 # Update the callbacks to handle both table selection and timeline clicks
 @app.callback(
@@ -986,4 +1049,12 @@ def get_button_style(stars, current_rating, is_first):
 
 # Run the app
 if __name__ == '__main__':
+    # Run extraction first
+    if not run_extraction():
+        print("Warning: Extraction script failed, but continuing with dashboard...")
+    
+    # Configure server to suppress GET/POST messages
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    
+    # Start the server
     app.run_server(debug=False, port=8051) 
