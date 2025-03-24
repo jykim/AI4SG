@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 import yaml
 import logging
+import colorsys
 
 class Config:
     """Configuration class to manage application settings"""
@@ -56,7 +57,65 @@ logging.basicConfig(
     ]
 )
 
-DEFAULT_ROOT_DIR = '/Users/lifidea/Library/CloudStorage/GoogleDrive-myleo.jerry@gmail.com/My Drive/Reading/By Type/[책모음 총 6900여권]/'
+def generate_color_from_string(text: str) -> str:
+    """
+    Generate a consistent color code from a string using a hash function.
+    The color will be visually pleasing and maintain good contrast.
+    
+    Args:
+        text: Input string to generate color from
+        
+    Returns:
+        Hex color code in the format #RRGGBB
+    """
+    if not text:
+        return '#95A5A6'  # Default gray for empty text
+    
+    # Use hash of the string to generate consistent colors
+    hash_value = hash(text.lower())
+    
+    # Generate HSL values for a visually pleasing color
+    # Use golden ratio to spread colors evenly
+    golden_ratio = 0.618033988749895
+    hue = (hash_value * golden_ratio) % 1.0  # Spread hues evenly
+    saturation = 0.7  # Keep colors vibrant but not too intense
+    lightness = 0.6  # Keep colors visible but not too dark
+    
+    # Convert HSL to RGB
+    rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+    
+    # Convert to hex color code
+    hex_color = '#{:02x}{:02x}{:02x}'.format(
+        int(rgb[0] * 255),
+        int(rgb[1] * 255),
+        int(rgb[2] * 255)
+    )
+    
+    return hex_color
+
+def get_source_color(source: str) -> str:
+    """
+    Get color code for a source type.
+    Generates a consistent color based on the source name.
+    
+    Args:
+        source: Source string to get color for
+        
+    Returns:
+        Hex color code for the source type
+    """
+    if not source:
+        return '#95A5A6'  # Default gray for empty source
+    
+    # Clean up the source name
+    clean_source = source.strip()
+    
+    # Remove language suffix if present
+    if clean_source.endswith(' (kr)'):
+        clean_source = clean_source[:-5].strip()
+    
+    # Generate color from the cleaned source name
+    return generate_color_from_string(clean_source)
 
 def normalize_text(text: str) -> str:
     """
@@ -288,6 +347,8 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
     2. Extract title from filename
     3. Extract metadata from YAML frontmatter
     4. Get file size
+    5. Extract URL from frontmatter or markdown content
+    6. Extract source from folder name if not in frontmatter
     
     Args:
         file_path: Path to the text file
@@ -298,8 +359,10 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
         - date: Reading date in YYYY-MM-DD format
         - title: Reading title
         - author: Author name
-        - source: Source of the reading
+        - source: Source of the reading (from frontmatter or folder name)
+        - source_color: Color code for the source type
         - size: File size in human readable format
+        - url: URL of the reading material
     """
     try:
         path = pathlib.Path(file_path)
@@ -319,10 +382,12 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
             'title': title.strip(),
             'author': '',
             'source': '',
-            'size': size
+            'source_color': '',
+            'size': size,
+            'url': ''
         }
         
-        # Read file content to extract YAML frontmatter
+        # Read file content to extract YAML frontmatter and URL
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
             
@@ -353,6 +418,10 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
                     if sources:
                         metadata['source'] = ', '.join(sources)
                     
+                    # Extract URL from frontmatter if present
+                    if 'url' in frontmatter_data:
+                        metadata['url'] = frontmatter_data['url']
+                    
                     # Use frontmatter date if available
                     if 'date' in frontmatter_data:
                         try:
@@ -368,6 +437,29 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
                 if debug:
                     print(f"Warning: Failed to parse YAML frontmatter: {str(e)}")
         
+        # If URL not found in frontmatter, try to extract from markdown content
+        if not metadata['url']:
+            # Look for URL in markdown link after "By"
+            url_match = re.search(r'By\s+\[([^\]]+)\]\(([^)]+)\)', content)
+            if url_match:
+                metadata['url'] = url_match.group(2)
+        
+        # If source is empty, try to get it from the folder name
+        if not metadata['source']:
+            # Get the parent folder name and normalize it
+            parent_folder = path.parent.name
+            if parent_folder and parent_folder != '.':
+                # Clean up the folder name by removing common separators and normalizing spaces
+                clean_folder = re.sub(r'[_-]', ' ', parent_folder)
+                clean_folder = ' '.join(clean_folder.split())  # Normalize spaces
+                if clean_folder and is_meaningful_title(clean_folder):
+                    metadata['source'] = clean_folder
+                    if debug:
+                        print(f"DEBUG - Using folder name as source: '{clean_folder}'")
+        
+        # Set source color based on the source type
+        metadata['source_color'] = get_source_color(metadata['source'])
+        
         if debug:
             print(f"DEBUG - Extracted metadata: {metadata}")
             
@@ -380,7 +472,9 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
             'title': '',
             'author': '',
             'source': '',
-            'size': ''
+            'source_color': '#95A5A6',  # Default gray color
+            'size': '',
+            'url': ''
         }
 
 def index_txt_files(root_dir: str, debug: bool = False, max_files: Optional[int] = None) -> List[Dict]:
@@ -425,7 +519,9 @@ def index_txt_files(root_dir: str, debug: bool = False, max_files: Optional[int]
             'title': metadata['title'],
             'author': metadata['author'],
             'source': metadata['source'],
-            'size': metadata['size']
+            'source_color': metadata['source_color'],
+            'size': metadata['size'],
+            'url': metadata['url']
         })
     
     return entries_info
@@ -446,7 +542,7 @@ def save_to_csv(entries_info: List[Dict], output_file: str = None):
     if output_file is None:
         output_file = config.output_dir / 'reading_entries.csv'
     
-    fieldnames = ['date', 'title', 'author', 'source', 'size', 'full_path']
+    fieldnames = ['date', 'title', 'author', 'source', 'source_color', 'size', 'url', 'full_path']
     
     with open(output_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -458,7 +554,9 @@ def save_to_csv(entries_info: List[Dict], output_file: str = None):
                 'title': str(entry.get('title', '')).strip().replace('\n', ' '),
                 'author': str(entry.get('author', '')).strip().replace('\n', ' '),
                 'source': str(entry.get('source', '')).strip().replace('\n', ' '),
+                'source_color': str(entry.get('source_color', '#95A5A6')).strip(),
                 'size': str(entry.get('size', '')).strip().replace('\n', ' '),
+                'url': str(entry.get('url', '')).strip().replace('\n', ' '),
                 'full_path': str(entry.get('full_path', '')).strip().replace('\n', ' ')
             }
             writer.writerow(clean_entry)
@@ -488,6 +586,10 @@ def save_to_markdown(entries_info: List[Dict], output_file: str = None):
             f.write(f"**Date:** {entry['date']}\n")
             if entry['author']:
                 f.write(f"**Author:** {entry['author']}\n")
+            if entry['source']:
+                f.write(f"**Source:** <span style='color: {entry['source_color']}'>{entry['source']}</span>\n")
+            if entry['url']:
+                f.write(f"**URL:** {entry['url']}\n")
             f.write("\n")
             
             # Read and include full content
