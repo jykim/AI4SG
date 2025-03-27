@@ -27,6 +27,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+.specstory
+.specstory/
+.specstory/*
 
 # Local configuration
 *.local.yaml
