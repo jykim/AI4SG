@@ -12,6 +12,7 @@ env/
 api_cache/
 agent_cache/
 output/
+vector_store/
 
 # OS generated files
 .DS_Store
