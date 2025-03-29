@@ -387,7 +387,6 @@ def load_journal_entries() -> pd.DataFrame:
         ])), axis=1)
         
         logging.info(f"Loaded {len(df)} journal entries")
-        logging.info(f"Sample entry: {df.iloc[0].to_dict() if not df.empty else 'No entries'}")
         return df
     except Exception as e:
         logging.error(f"Error loading journal entries: {e}")
@@ -498,23 +497,15 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
                 doc_contents = [doc.get('Content', '') for doc in bm25_retriever.documents]
                 total_tokens = sum(len(tokenize([content], stopwords='en')[0]) for content in doc_contents)
                 avg_doc_length = total_tokens / len(bm25_retriever.documents)
-                
-                # Debug: Print document contents
-                logging.info(f"Number of documents in BM25 index: {len(bm25_retriever.documents)}")
-                logging.info(f"First document content: {doc_contents[0][:100]}...")
-                logging.info(f"Query tokens: {query_tokens}")
             else:
                 total_tokens = 0
                 avg_doc_length = 0
-                logging.warning("No documents in BM25 index!")
             
             # Try to get relevant entries with error handling
             relevant_entries, timing_metrics = bm25_retriever.get_relevant_entries(query)
-            logging.info(f"BM25 retrieval completed. Found {len(relevant_entries)} entries.")
             
             # Filter out entries with zero scores
             relevant_entries = [entry for entry in relevant_entries if entry.get('match_score', 0) > 0]
-            logging.info(f"After filtering zero scores: {len(relevant_entries)} entries.")
             
             # Format relevant entries to ensure all fields are properly handled
             formatted_entries = []
