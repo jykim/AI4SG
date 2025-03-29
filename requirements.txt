@@ -1,5 +1,9 @@
-dash==2.14.2
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+dash-cytoscape>=0.3.0
 pandas>=2.0.0
+pyyaml>=6.0.0
+numpy>=1.24.0
 plotly>=5.18.0
 orjson>=3.9.10
 langchain>=0.1.0

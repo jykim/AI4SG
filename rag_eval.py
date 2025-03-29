@@ -19,6 +19,7 @@ from typing import Dict, List, Any, Optional
 
 from rag_utils import JournalRAG
 from ir_utils import BM25Retriever
+from rag_graph import create_graph_panel
 
 # Initialize configuration
 def load_config():
@@ -220,6 +221,9 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
     return dbc.Card([
         dbc.CardHeader("RAG Retrieval Information"),
         dbc.CardBody([
+            # Graph Visualization
+            create_graph_panel(debug_info, config),
+            
             # Query Information
             html.H5("Query Information", className="mb-3"),
             html.Div([
@@ -471,6 +475,7 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             return [None]
         query = user_input
         logging.info(f"Performing keyword search for query: {query}")
+        is_doc_query = False
     else:
         # Handle random document click
         clicked_index = next((i for i, v in enumerate(random_clicks_state) if v is not None), None)
@@ -478,6 +483,7 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             return [None]
         query = doc_contents[clicked_index]
         logging.info("Performing document-based retrieval")
+        is_doc_query = True
     
     # Perform retrieval based on selected method
     if retrieval_method == "bm25":
@@ -506,6 +512,21 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             
             # Filter out entries with zero scores
             relevant_entries = [entry for entry in relevant_entries if entry.get('match_score', 0) > 0]
+            
+            # If this is a document query, filter out the query document itself
+            if is_doc_query:
+                # Parse the query document's title from the metadata
+                query_lines = query.split('\n')
+                query_title = next((line.split(':', 1)[1].strip() 
+                                  for line in query_lines 
+                                  if line.startswith('Title:')), None)
+                
+                if query_title:
+                    relevant_entries = [
+                        entry for entry in relevant_entries 
+                        if entry.get('Title', '').strip() != query_title.strip()
+                    ]
+                    logging.info(f"Filtered out query document '{query_title}' from results")
             
             # Format relevant entries to ensure all fields are properly handled
             formatted_entries = []
@@ -586,6 +607,21 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
                         exact_match_entries.append(entry_dict)
                         break  # Break after finding first match in this document
             
+            # If this is a document query, filter out the query document itself
+            if is_doc_query:
+                # Parse the query document's title from the metadata
+                query_lines = query.split('\n')
+                query_title = next((line.split(':', 1)[1].strip() 
+                                  for line in query_lines 
+                                  if line.startswith('Title:')), None)
+                
+                if query_title:
+                    exact_match_entries = [
+                        entry for entry in exact_match_entries 
+                        if entry.get('Title', '').strip() != query_title.strip()
+                    ]
+                    logging.info(f"Filtered out query document '{query_title}' from results")
+            
             # Format entries
             formatted_entries = []
             for entry in exact_match_entries:
@@ -634,6 +670,22 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
     else:
         # Vector search (without exact matches)
         relevant_entries, timing_metrics = rag.get_relevant_entries(query)
+        
+        # If this is a document query, filter out the query document itself
+        if is_doc_query:
+            # Parse the query document's title from the metadata
+            query_lines = query.split('\n')
+            query_title = next((line.split(':', 1)[1].strip() 
+                              for line in query_lines 
+                              if line.startswith('Title:')), None)
+            
+            if query_title:
+                relevant_entries = [
+                    entry for entry in relevant_entries 
+                    if entry.get('Title', '').strip() != query_title.strip()
+                ]
+                logging.info(f"Filtered out query document '{query_title}' from results")
+        
         # Format relevant entries to ensure all fields are properly handled
         formatted_entries = []
         for entry in relevant_entries:
