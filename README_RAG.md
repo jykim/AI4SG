@@ -1,20 +1,29 @@
-# RAG Pipeline and Chat Evaluation Interface
+# RAG Pipeline and Evaluation Interface
 
-This document describes the Retrieval Augmented Generation (RAG) pipeline and chat evaluation interface for the Journal Chat system.
+This document describes the Retrieval Augmented Generation (RAG) pipeline and evaluation interface for the Journal system.
 
 ## RAG Pipeline Overview
 
 The RAG pipeline consists of the following components:
 
-### 1. Document Processing
-- Journal entries are split into chunks using `RecursiveCharacterTextSplitter`
-  - Chunk size: 1000 characters
-  - Chunk overlap: 200 characters
-  - Separators: ["\n\n", "\n", " ", ""]
+### 1. Configuration
+- Uses `config_rag.yaml` for all RAG-specific parameters:
+  - Embedding model settings
+  - Text splitting parameters
+  - Retrieval settings
+  - Vector store configuration
+  - Metadata matching fields
+  - Logging configuration
 
-### 2. Vector Store
+### 2. Document Processing
+- Journal entries are split into chunks using `RecursiveCharacterTextSplitter`
+  - Chunk size: Configurable (default: 500 characters)
+  - Chunk overlap: Configurable (default: 100 characters)
+  - Separators: Configurable (default: ["\n\n", "\n", " ", ""])
+
+### 3. Vector Store
 - Uses ChromaDB as the vector store
-- Embeddings: sentence-transformers/all-MiniLM-L6-v2
+- Embeddings: Configurable (default: sentence-transformers/all-MiniLM-L6-v2)
 - Documents are stored with metadata including:
   - Date
   - Time
@@ -23,34 +32,28 @@ The RAG pipeline consists of the following components:
   - Topic
   - Tags
 
-### 3. Retrieval Process
-- Retrieves up to 7 most relevant documents
-- Uses similarity score threshold for retrieval
+### 4. Retrieval Process
+- Hybrid retrieval combining:
+  - Semantic search using embeddings
+  - Exact matching on metadata fields
+- Configurable parameters:
+  - Initial retrieval size (k)
+  - Final number of documents
+  - Maximum chunks per document
+  - Exact match score threshold
 - Filters out duplicate content
-- Includes match scores for each document
+- Includes match scores and match types for each document
 
-### 4. Response Generation
-Two modes of operation:
+## Evaluation Interface
 
-#### Normal Mode
-- Uses both recent entries (past 7 days) and RAG-retrieved entries
-- Provides full context for comprehensive responses
-
-#### RAG-Only Mode
-- Uses only RAG-retrieved entries
-- Focuses on semantic similarity for responses
-- Useful for testing RAG effectiveness
-
-## Chat Evaluation Interface
-
-The chat evaluation interface (`chat_eval.py`) provides a dashboard for testing and analyzing the RAG system.
+The RAG evaluation interface (`rag_eval.py`) provides a dashboard for testing and analyzing the RAG system.
 
 ### Features
 
-1. **Chat Interface**
-   - Real-time chat with the AI assistant
-   - Message history display
-   - Input area with send button
+1. **Query Interface**
+   - Query input with search button
+   - Real-time results display
+   - Support for both Korean and English queries
 
 2. **Debug Panel**
    - RAG Information
@@ -65,18 +68,8 @@ The chat evaluation interface (`chat_eval.py`) provides a dashboard for testing 
      - Number of unique documents after filtering
    - Retrieved Documents
      - Document details with match scores
+     - Match type (exact/semantic)
      - Formatted display of content
-   - Response Generation Info
-     - Model used
-     - Tokens used
-     - Processing time
-   - Cache Information
-     - Cache hit status
-     - Cache key
-
-3. **Mode Toggles**
-   - Debug Info Toggle: Shows/hides detailed debug information
-   - RAG-Only Mode Toggle: Switches between normal and RAG-only modes
 
 ### Performance Metrics
 
@@ -91,45 +84,55 @@ The interface provides detailed timing information for each component:
    - Total documents in index
    - Number of documents initially retrieved
    - Number of unique documents after filtering
+   - Number of exact matches vs semantic matches
 
-3. **Response Metrics**
-   - Total processing time
-   - Token usage
-   - Cache hit rate
+3. **Chunk Statistics**
+   - Average chunks per document
+   - Documents with multiple chunks
+   - Chunks filtered due to limits
 
 ## Usage
 
-1. Start the chat evaluation interface:
-   ```bash
-   python chat_eval.py
+1. Configure RAG parameters in `config_rag.yaml`:
+   ```yaml
+   # Example configuration
+   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+   chunk_size: 500
+   chunk_overlap: 100
+   initial_k: 100
+   final_k: 15
+   max_chunks_per_doc: 3
+   exact_match_score: 0.9
    ```
 
-2. Access the interface at `http://localhost:8051`
+2. Start the RAG evaluation interface:
+   ```bash
+   python rag_eval.py
+   ```
 
-3. Use the toggles to:
-   - Show/hide debug information
-   - Switch between normal and RAG-only modes
+3. Access the interface at `http://localhost:8051`
 
-4. Monitor the debug panel for:
-   - RAG performance metrics
-   - Retrieved document details
-   - Response generation statistics
+4. Use the interface to:
+   - Test queries in Korean or English
+   - Monitor retrieval performance
+   - Analyze document matching quality
 
 ## Debugging Tips
 
 1. **Slow Retrieval**
    - Check the number of documents in the index
    - Monitor retrieval time in the debug panel
-   - Consider adjusting chunk size/overlap
+   - Consider adjusting chunk size/overlap in config
 
 2. **Duplicate Documents**
    - Check the number of unique documents vs. retrieved documents
    - Adjust chunk overlap if too many duplicates
+   - Review max_chunks_per_doc setting
 
-3. **Response Quality**
-   - Compare responses between normal and RAG-only modes
-   - Check match scores of retrieved documents
-   - Monitor token usage and processing time
+3. **Match Quality**
+   - Monitor exact vs semantic match ratio
+   - Adjust exact_match_score if needed
+   - Review exact_match_fields configuration
 
 ## Future Improvements
 
@@ -144,6 +147,6 @@ The interface provides detailed timing information for each component:
    - Add export functionality for debug data
 
 3. **RAG Enhancements**
-   - Implement hybrid search (keyword + semantic)
+   - Support for multiple embedding models
    - Add document reranking
-   - Support for multiple embedding models 
+   - Implement advanced metadata filtering 
