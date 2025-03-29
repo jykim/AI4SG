@@ -26,6 +26,7 @@ exact_match_fields:
   - emotion
   - topic
   - tags
+  - content  # Added content field for exact matching
 
 # BM25 Settings
 bm25:

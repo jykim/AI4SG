@@ -95,7 +95,8 @@ class JournalRAG:
                 'title': str(title) if pd.notna(title) else 'Untitled',
                 'emotion': str(emotion) if pd.notna(emotion) else '',
                 'topic': str(topic) if pd.notna(topic) else '',
-                'tags': str(tags) if pd.notna(tags) else ''
+                'tags': str(tags) if pd.notna(tags) else '',
+                'content': str(content) if pd.notna(content) else ''  # Add content to metadata
             }
             
             # Create document
@@ -139,11 +140,17 @@ class JournalRAG:
             }
         )
         logging.info("Vector store and retriever initialized")
+        
+        # Log collection info
+        collection = self.vector_store.get()
+        logging.info(f"Vector store contains {len(collection['documents'])} documents")
+        logging.info(f"Sample document: {collection['documents'][0][:100]}...")
+        logging.info(f"Sample metadata: {collection['metadatas'][0]}")
     
     def get_relevant_entries(self, query: str, k: int = None) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
         """
         Retrieve relevant journal entries for a given query with document-level diversity.
-        Combines embedding-based retrieval with exact metadata matching.
+        Uses embedding-based retrieval only.
         """
         if k is None:
             k = self.config['final_k']
@@ -159,7 +166,7 @@ class JournalRAG:
             start_time = time.time()
             logging.info(f"Invoking retriever with query: {query}")
             
-            # 1. Get embedding-based results
+            # Get embedding-based results
             results = self.vector_store.similarity_search_with_score(
                 query,
                 k=self.config['initial_k']  # Use config value
@@ -167,68 +174,22 @@ class JournalRAG:
             relevant_docs = [doc for doc, _ in results]
             scores = [score for _, score in results]
             
-            logging.info(f"Retrieved {len(relevant_docs)} documents from embedding search")
-            logging.info(f"Score range: {min(scores):.3f} to {max(scores):.3f}")
-            
-            # 2. Get exact match results from metadata
-            exact_match_docs = []
-            exact_match_scores = []
-            
-            # Get all documents from vector store
-            collection = self.vector_store.get()
-            documents = collection['documents']
-            metadatas = collection['metadatas']
-            
-            # Search in metadata fields
-            for i, metadata in enumerate(metadatas):
-                # Check configured metadata fields
-                if any(query.lower() in metadata.get(field, '').lower() 
-                      for field in self.config['exact_match_fields']):
-                    # Create a Document object with the content and metadata
-                    doc = Document(
-                        page_content=documents[i],
-                        metadata=metadata
-                    )
-                    exact_match_docs.append(doc)
-                    # Use configured score for exact matches
-                    exact_match_scores.append(self.config['exact_match_score'])
-            
-            logging.info(f"Found {len(exact_match_docs)} exact matches in metadata")
-            
-            # 3. Combine results
-            # Create a set of document IDs to track unique documents
-            seen_doc_ids = set()
-            combined_docs = []
-            combined_scores = []
-            
-            # First add exact matches (they get priority)
-            for doc, score in zip(exact_match_docs, exact_match_scores):
-                doc_id = f"{doc.metadata.get('date', '')}_{doc.metadata.get('title', '')}"
-                if doc_id not in seen_doc_ids:
-                    seen_doc_ids.add(doc_id)
-                    combined_docs.append(doc)
-                    combined_scores.append(score)
-            
-            # Then add embedding-based results
-            for doc, score in zip(relevant_docs, scores):
-                doc_id = f"{doc.metadata.get('date', '')}_{doc.metadata.get('title', '')}"
-                if doc_id not in seen_doc_ids:
-                    seen_doc_ids.add(doc_id)
-                    combined_docs.append(doc)
-                    combined_scores.append(score)
-            
-            logging.info(f"Combined results: {len(combined_docs)} unique documents")
+            # Calculate retrieval time
             timing_metrics['retrieval_time'] = time.time() - start_time
             
-            # Measure document processing time
-            start_time = time.time()
+            logging.info(f"Retrieved {len(relevant_docs)} documents from embedding search")
+            logging.info(f"Score range: {min(scores):.3f} to {max(scores):.3f}")
+            logging.info(f"Sample retrieved document: {relevant_docs[0].page_content[:100]}...")
+            logging.info(f"Sample retrieved metadata: {relevant_docs[0].metadata}")
+            
+            # Process documents
             seen_content = set()
             seen_documents = set()  # Track unique documents
             chunks_per_doc = {}  # Track number of chunks per document
             relevant_entries = []
             
             # Sort documents by score
-            docs_with_scores = list(zip(combined_docs, combined_scores))
+            docs_with_scores = list(zip(relevant_docs, scores))
             docs_with_scores.sort(key=lambda x: x[1], reverse=True)
             logging.info(f"Sorted {len(docs_with_scores)} documents by score")
             
@@ -268,7 +229,7 @@ class JournalRAG:
                     'match_score': score,
                     'doc_id': doc_id,
                     'chunk_index': chunks_per_doc[doc_id] - 1,  # 0-based index
-                    'match_type': 'exact' if score == self.config['exact_match_score'] else 'semantic'  # Add match type for debugging
+                    'match_type': 'semantic'  # All matches are semantic now
                 }
                 relevant_entries.append(entry)
                 
@@ -277,24 +238,18 @@ class JournalRAG:
                     logging.info(f"Reached target number of entries ({k*2})")
                     break
             
-            timing_metrics['processing_time'] = time.time() - start_time
-            timing_metrics['total_time'] = timing_metrics['retrieval_time'] + timing_metrics['processing_time']
-            timing_metrics['num_docs_retrieved'] = len(combined_docs)
+            # Calculate processing time
+            timing_metrics['processing_time'] = time.time() - start_time - timing_metrics['retrieval_time']
+            timing_metrics['total_time'] = time.time() - start_time
+            timing_metrics['num_docs_retrieved'] = len(relevant_docs)
             timing_metrics['num_unique_docs'] = len(seen_documents)
             timing_metrics['num_chunks'] = len(relevant_entries)
-            timing_metrics['num_exact_matches'] = len(exact_match_docs)
             timing_metrics['num_semantic_matches'] = len(relevant_docs)
             
             logging.info(f"Final results: {len(relevant_entries)} entries from {len(seen_documents)} unique documents")
             logging.info(f"Filtering stats:")
-            logging.info(f"- Initial documents: {len(combined_docs)}")
-            logging.info(f"- Exact matches: {len(exact_match_docs)}")
-            logging.info(f"- Semantic matches: {len(relevant_docs)}")
-            logging.info(f"- Duplicate content filtered: {len(combined_docs) - len(seen_content)}")
-            logging.info(f"- Max chunks per doc filtered: {sum(max(0, count - self.config['max_chunks_per_doc']) for count in chunks_per_doc.values())}")
-            logging.info(f"- Final unique documents: {len(seen_documents)}")
-            logging.info(f"- Final entries: {len(relevant_entries)}")
-            logging.info(f"- Chunks per document: {chunks_per_doc}")
+            logging.info(f"- Initial documents: {len(relevant_docs)}")
+            
             return relevant_entries, timing_metrics
             
         except Exception as e:

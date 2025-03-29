@@ -82,33 +82,39 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
                 ], className="mb-2"),
             ], className="bg-light p-3 rounded mb-3"),
         ])
-    else:
+    elif retrieval_method == "EXACT":
         metrics_section = html.Div([
-            html.H6("Vector Search Metrics", className="mt-4 mb-2"),
+            html.H6("Exact Match Metrics", className="mt-4 mb-2"),
             html.Div([
-                html.Div([
-                    html.Strong("Retrieval Time: "),
-                    html.Span(f"{debug_info.get('rag_metrics', {}).get('retrieval_time', 0):.3f}s"),
-                ], className="mb-2"),
-                html.Div([
-                    html.Strong("Processing Time: "),
-                    html.Span(f"{debug_info.get('rag_metrics', {}).get('processing_time', 0):.3f}s"),
-                ], className="mb-2"),
                 html.Div([
                     html.Strong("Total Time: "),
                     html.Span(f"{debug_info.get('rag_metrics', {}).get('total_time', 0):.3f}s"),
                 ], className="mb-2"),
                 html.Div([
-                    html.Strong("Initial Documents Retrieved: "),
+                    html.Strong("Documents Retrieved: "),
+                    html.Span(str(debug_info.get('rag_metrics', {}).get('num_docs_retrieved', 0))),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Match Score: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('exact_match_score', 0):.3f}"),
+                ], className="mb-2"),
+            ], className="bg-light p-3 rounded mb-3"),
+        ])
+    else:  # Vector Search
+        metrics_section = html.Div([
+            html.H6("Vector Search Metrics", className="mt-4 mb-2"),
+            html.Div([
+                html.Div([
+                    html.Strong("Total Time: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('total_time', 0):.3f}s"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Documents Retrieved: "),
                     html.Span(str(debug_info.get('rag_metrics', {}).get('num_docs_retrieved', 0))),
                 ], className="mb-2"),
                 html.Div([
                     html.Strong("Unique Documents: "),
                     html.Span(str(debug_info.get('rag_metrics', {}).get('num_unique_docs', 0))),
-                ], className="mb-2"),
-                html.Div([
-                    html.Strong("Total Chunks: "),
-                    html.Span(str(debug_info.get('rag_metrics', {}).get('num_chunks', 0))),
                 ], className="mb-2"),
             ], className="bg-light p-3 rounded mb-3"),
         ])
@@ -136,7 +142,27 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
                 ], className="mb-2"),
             ], className="bg-light p-3 rounded mb-3"),
         ])
-    else:
+    elif retrieval_method == "EXACT":
+        diversity_section = html.Div([
+            html.H6("Match Information", className="mt-4 mb-2"),
+            html.Div([
+                html.Div([
+                    html.Strong("Match Fields: "),
+                    html.Span(", ".join(debug_info.get('exact_match_fields', []))),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Matches per Field: "),
+                    html.Div([
+                        html.Div([
+                            html.Strong(f"{field}: "),
+                            html.Span(str(count)),
+                        ], className="mb-1")
+                        for field, count in debug_info.get('matches_per_field', {}).items()
+                    ]),
+                ], className="mb-2"),
+            ], className="bg-light p-3 rounded mb-3"),
+        ])
+    else:  # Vector Search
         diversity_section = html.Div([
             html.H6("Document Diversity", className="mt-4 mb-2"),
             html.Div([
@@ -243,7 +269,8 @@ def create_query_panel() -> dbc.Card:
                     id="retrieval-method",
                     options=[
                         {"label": "BM25 (Default)", "value": "bm25"},
-                        {"label": "Vector Search", "value": "vector"}
+                        {"label": "Vector Search", "value": "vector"},
+                        {"label": "Exact Match", "value": "exact"}
                     ],
                     value="bm25",
                     inline=True,
@@ -359,6 +386,8 @@ def load_journal_entries() -> pd.DataFrame:
             row['etc_visual'] if pd.notna(row['etc_visual']) else ''
         ])), axis=1)
         
+        logging.info(f"Loaded {len(df)} journal entries")
+        logging.info(f"Sample entry: {df.iloc[0].to_dict() if not df.empty else 'No entries'}")
         return df
     except Exception as e:
         logging.error(f"Error loading journal entries: {e}")
@@ -405,11 +434,23 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
         error_message = "No journal entries found. Please ensure there are CSV files in the input directory."
         return [html.Div(error_message, className="alert alert-danger")]
     
+    logging.info(f"Processing query with {len(journal_entries)} journal entries")
+    
     # Initialize retrievers if needed
-    if retrieval_method == "vector" and not rag.vector_store:
-        logging.info("Initializing vector store...")
-        rag.initialize_vector_store(journal_entries.to_dict('records'))
-        logging.info("Vector store initialized")
+    if retrieval_method in ["vector", "exact"]:
+        if not rag.vector_store:
+            logging.info("Initializing vector store...")
+            rag.initialize_vector_store(journal_entries.to_dict('records'))
+            logging.info("Vector store initialized")
+        else:
+            # Check if we need to update the vector store
+            collection = rag.vector_store.get()
+            current_docs = len(collection['documents'])
+            if current_docs != len(journal_entries):
+                logging.info(f"Updating vector store: {current_docs} docs -> {len(journal_entries)} docs")
+                rag.initialize_vector_store(journal_entries.to_dict('records'))
+                logging.info("Vector store updated")
+    
     elif retrieval_method == "bm25":
         # Check if we need to create or update the index
         if not bm25_retriever.documents:
@@ -449,7 +490,7 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             # Get query tokens for debugging
             from bm25s import tokenize
             query_tokens = tokenize([query], stopwords='en')[0]  # This returns a list of tokens
-            query_tokens_str = ', '.join(str(token) for token in query_tokens)  # Convert each token to string
+            query_tokens_str = ', '.join(str(token) for token in query_tokens)
             
             # Get index statistics
             if bm25_retriever.documents:
@@ -470,6 +511,10 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             # Try to get relevant entries with error handling
             relevant_entries, timing_metrics = bm25_retriever.get_relevant_entries(query)
             logging.info(f"BM25 retrieval completed. Found {len(relevant_entries)} entries.")
+            
+            # Filter out entries with zero scores
+            relevant_entries = [entry for entry in relevant_entries if entry.get('match_score', 0) > 0]
+            logging.info(f"After filtering zero scores: {len(relevant_entries)} entries.")
             
             # Format relevant entries to ensure all fields are properly handled
             formatted_entries = []
@@ -530,7 +575,73 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
                 'error_message': str(e)
             }
             return [create_debug_panel(debug_info)]
+    elif retrieval_method == "exact":
+        try:
+            # Convert query to lowercase for case-insensitive matching
+            query_lower = query.lower()
+            
+            # Search for substring matches in entries
+            exact_match_entries = []
+            matches_per_field = {field: 0 for field in rag.config['exact_match_fields']}
+            
+            # Search in entries
+            for _, entry in journal_entries.iterrows():
+                entry_dict = entry.to_dict()
+                # Check configured metadata fields
+                for field in rag.config['exact_match_fields']:
+                    field_value = str(entry_dict.get(field, entry_dict.get(field.capitalize(), ''))).lower()
+                    if query_lower in field_value:
+                        matches_per_field[field] += 1
+                        exact_match_entries.append(entry_dict)
+                        break  # Break after finding first match in this document
+            
+            # Format entries
+            formatted_entries = []
+            for entry in exact_match_entries:
+                formatted_entry = {
+                    'match_score': rag.config['exact_match_score'],
+                    'Date': str(entry.get('Date', '')),
+                    'Title': str(entry.get('Title', '')),
+                    'emotion': str(entry.get('emotion', '')),
+                    'topic': str(entry.get('topic', '')),
+                    'Tags': str(entry.get('Tags', '')),
+                    'Content': str(entry.get('Content', ''))
+                }
+                formatted_entries.append(formatted_entry)
+            
+            # Add timing metrics
+            timing_metrics = {
+                'total_time': time.time() - start_time,
+                'num_docs_retrieved': len(formatted_entries),
+                'num_exact_matches': len(formatted_entries)
+            }
+            
+            debug_info = {
+                'query': query,
+                'total_docs': len(journal_entries),
+                'retrieved_docs_count': len(formatted_entries),
+                'retrieved_documents': formatted_entries,
+                'rag_metrics': timing_metrics,
+                'retrieval_method': retrieval_method,
+                'matches_per_field': matches_per_field,
+                'exact_match_fields': rag.config['exact_match_fields']
+            }
+            return [create_debug_panel(debug_info)]
+            
+        except Exception as e:
+            logging.error(f"Error in exact match processing: {str(e)}")
+            debug_info = {
+                'query': query,
+                'total_docs': len(journal_entries),
+                'retrieved_docs_count': 0,
+                'retrieved_documents': [],
+                'rag_metrics': {},
+                'retrieval_method': retrieval_method,
+                'error_message': str(e)
+            }
+            return [create_debug_panel(debug_info)]
     else:
+        # Vector search (without exact matches)
         relevant_entries, timing_metrics = rag.get_relevant_entries(query)
         # Format relevant entries to ensure all fields are properly handled
         formatted_entries = []
