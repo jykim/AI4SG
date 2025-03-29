@@ -128,23 +128,71 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
         ])
     ])
 
+def get_random_documents(df: pd.DataFrame, n: int = 5) -> List[Dict[str, Any]]:
+    """Get n random documents from the dataframe."""
+    if df.empty:
+        return []
+    random_docs = df.sample(n=min(n, len(df))).to_dict('records')
+    return random_docs
+
 def create_query_panel() -> dbc.Card:
     """Create the query interface panel."""
     return dbc.Card([
         dbc.CardHeader("Query Interface"),
         dbc.CardBody([
-            # Input area
-            dbc.InputGroup([
-                dbc.Textarea(
-                    id="user-input",
-                    placeholder="Enter your query...",
-                    className="me-2",
-                    style={"height": "100px"}
-                ),
-                dbc.Button("Search", id="search-button", color="primary")
+            # Keyword Query Section
+            html.Div([
+                html.H5("Keyword Query", className="mb-3"),
+                # Input area
+                dbc.InputGroup([
+                    dbc.Textarea(
+                        id="user-input",
+                        placeholder="Enter your query...",
+                        className="me-2",
+                        style={"height": "100px"}
+                    ),
+                    dbc.Button("Search", id="search-button", color="primary")
+                ]),
             ]),
+            # Document Query Section
+            html.Div([
+                html.H5("Document Query", className="mt-4 mb-3"),
+                html.Div(id="random-docs-list", className="list-group")
+            ])
         ])
     ], className="h-100")
+
+def create_random_doc_item(doc: Dict[str, Any], index: int) -> html.Div:
+    """Create a clickable random document item."""
+    content = doc.get('Content', '')
+    # Handle NaN values
+    if pd.isna(content):
+        content = ''
+    content = str(content)
+    
+    # Create metadata string for query
+    metadata = {
+        'date': doc.get('Date', ''),
+        'title': doc.get('Title', ''),
+        'emotion': doc.get('emotion', ''),
+        'topic': doc.get('topic', ''),
+        'tags': doc.get('Tags', '')
+    }
+    metadata_str = f"Date: {metadata['date']}\nTitle: {metadata['title']}\nEmotion: {metadata['emotion']}\nTopic: {metadata['topic']}\nTags: {metadata['tags']}\n\nContent: {content}"
+    
+    return html.Div([
+        html.Div([
+            html.Strong(f"{doc.get('Date', '')} - {doc.get('Title', '')}"),
+            html.Br(),
+            html.Small(content[:100] + '...' if len(content) > 100 else content),
+            # Store the full content and metadata in a hidden div
+            html.Div(metadata_str, 
+                    id={'type': 'doc-content', 'index': index},
+                    style={'display': 'none'})
+        ], className="list-group-item list-group-item-action", 
+           id={'type': 'random-doc', 'index': index},
+           style={'cursor': 'pointer'})
+    ])
 
 # App layout
 app.layout = dbc.Container([
@@ -206,28 +254,43 @@ def load_journal_entries() -> pd.DataFrame:
         logging.error(f"Error loading journal entries: {e}")
         return pd.DataFrame()
 
-# Callback to handle query and display results
+# Callback to update random documents
 @callback(
-    [Output("results-panel", "children")],
-    [Input("search-button", "n_clicks"),
-     Input("user-input", "n_submit")],
-    [State("user-input", "value")]
+    Output("random-docs-list", "children"),
+    Input("search-button", "n_clicks")
 )
-def handle_query(n_clicks, n_submit, user_input):
-    """Handle query submission and display RAG results."""
-    if not user_input or (not n_clicks and not n_submit):
+def update_random_docs(n_clicks):
+    """Update the list of random documents."""
+    journal_entries = load_journal_entries()
+    if journal_entries.empty:
+        return []
+    
+    random_docs = get_random_documents(journal_entries)
+    return [create_random_doc_item(doc, i) for i, doc in enumerate(random_docs)]
+
+# Combined callback to handle both keyword search and document-based retrieval
+@callback(
+    Output("results-panel", "children"),
+    [Input("user-input", "n_submit"),
+     Input({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks')],
+    [State("user-input", "value"),
+     State({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks'),
+     State({'type': 'doc-content', 'index': dash.ALL}, 'children')]
+)
+def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents):
+    """Handle both keyword search and document-based retrieval."""
+    ctx = dash.callback_context
+    if not ctx.triggered:
         return [None]
+    
+    # Get the trigger ID
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
     
     # Load journal entries
     journal_entries = load_journal_entries()
     if journal_entries.empty:
         error_message = "No journal entries found. Please ensure there are CSV files in the input directory."
         return [html.Div(error_message, className="alert alert-danger")]
-    
-    # Log journal entries info
-    logging.info(f"Loaded {len(journal_entries)} journal entries")
-    golf_entries = journal_entries[journal_entries['Content'].str.contains('golf', case=False, na=False)]
-    logging.info(f"Found {len(golf_entries)} entries containing 'golf'")
     
     # Initialize vector store if not already initialized
     if not rag.vector_store:
@@ -239,16 +302,29 @@ def handle_query(n_clicks, n_submit, user_input):
     import time
     start_time = time.time()
     
+    # Determine the query based on the trigger
+    if trigger_id == 'user-input':
+        if not user_input:
+            return [None]
+        query = user_input
+        logging.info(f"Performing keyword search for query: {query}")
+    else:
+        # Handle random document click
+        clicked_index = next((i for i, v in enumerate(random_clicks_state) if v is not None), None)
+        if clicked_index is None or clicked_index >= len(doc_contents):
+            return [None]
+        query = doc_contents[clicked_index]
+        logging.info("Performing document-based retrieval")
+    
     # Perform RAG retrieval
-    logging.info(f"Performing retrieval for query: {user_input}")
-    relevant_entries, timing_metrics = rag.get_relevant_entries(user_input)
+    relevant_entries, timing_metrics = rag.get_relevant_entries(query)
     logging.info(f"Retrieved {len(relevant_entries)} relevant entries")
     
     processing_time = time.time() - start_time
     
     # Create debug information
     debug_info = {
-        'query': user_input,
+        'query': query,
         'total_docs': len(journal_entries),
         'retrieved_docs_count': len(relevant_entries),
         'retrieved_documents': relevant_entries,
