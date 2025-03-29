@@ -31,7 +31,7 @@ def load_config():
         return yaml.safe_load(f)
 
 # Initialize the Dash app
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
 # Initialize configuration
 config = load_config()
@@ -218,11 +218,21 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
         ])
     ])
     
+    # Create the graph panel with elements
+    graph_panel = create_graph_panel(debug_info, config)
+    
+    # Add a hidden div to store the graph elements
+    elements_store = dcc.Store(
+        id='graph-elements-store',
+        data=debug_info.get('graph_elements', [])
+    )
+    
     return dbc.Card([
         dbc.CardHeader("RAG Retrieval Information"),
         dbc.CardBody([
             # Graph Visualization
-            create_graph_panel(debug_info, config),
+            graph_panel,
+            elements_store,  # Add the store component
             
             # Query Information
             html.H5("Query Information", className="mb-3"),
@@ -410,27 +420,18 @@ def update_random_docs(n_clicks):
     random_docs = get_random_documents(journal_entries)
     return [create_random_doc_item(doc, i) for i, doc in enumerate(random_docs)]
 
-# Combined callback to handle both keyword search and document-based retrieval
-@callback(
-    Output("results-panel", "children"),
-    [Input("user-input", "n_submit"),
-     Input({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks')],
-    [State("user-input", "value"),
-     State({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks'),
-     State({'type': 'doc-content', 'index': dash.ALL}, 'children'),
-     State("retrieval-method", "value")]
-)
-def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents, retrieval_method):
+def perform_search(query: str, retrieval_method: str, is_doc_query: bool = False) -> List[html.Div]:
     """
-    Handle both keyword search and document-based retrieval in the RAG evaluation interface.
+    Perform the search operation and return the results panel.
+    
+    Args:
+        query: The search query
+        retrieval_method: The retrieval method to use
+        is_doc_query: Whether this is a document-based query
+        
+    Returns:
+        List containing the debug panel component
     """
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return [None]
-    
-    # Get the trigger ID
-    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
     # Load journal entries
     journal_entries = load_journal_entries()
     if journal_entries.empty:
@@ -468,22 +469,6 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
     # Get RAG results with timing
     import time
     start_time = time.time()
-    
-    # Determine the query based on the trigger
-    if trigger_id == 'user-input':
-        if not user_input:
-            return [None]
-        query = user_input
-        logging.info(f"Performing keyword search for query: {query}")
-        is_doc_query = False
-    else:
-        # Handle random document click
-        clicked_index = next((i for i, v in enumerate(random_clicks_state) if v is not None), None)
-        if clicked_index is None or clicked_index >= len(doc_contents):
-            return [None]
-        query = doc_contents[clicked_index]
-        logging.info("Performing document-based retrieval")
-        is_doc_query = True
     
     # Perform retrieval based on selected method
     if retrieval_method == "bm25":
@@ -709,6 +694,89 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
             'retrieval_method': retrieval_method
         }
         return [create_debug_panel(debug_info)]
+
+# Combined callback to handle both keyword search and document-based retrieval
+@callback(
+    Output("results-panel", "children"),
+    [Input("user-input", "n_submit"),
+     Input({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks')],
+    [State("user-input", "value"),
+     State({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks'),
+     State({'type': 'doc-content', 'index': dash.ALL}, 'children'),
+     State("retrieval-method", "value")]
+)
+def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents, retrieval_method):
+    """
+    Handle both keyword search and document-based retrieval in the RAG evaluation interface.
+    """
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return [None]
+    
+    # Get the trigger ID
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Determine the query based on the trigger
+    if trigger_id == 'user-input':
+        if not user_input:
+            return [None]
+        query = user_input
+        logging.info(f"Performing keyword search for query: {query}")
+        is_doc_query = False
+    else:
+        # Handle random document click
+        clicked_index = next((i for i, v in enumerate(random_clicks_state) if v is not None), None)
+        if clicked_index is None or clicked_index >= len(doc_contents):
+            return [None]
+        query = doc_contents[clicked_index]
+        logging.info("Performing document-based retrieval")
+        is_doc_query = True
+    
+    return perform_search(query, retrieval_method, is_doc_query)
+
+# Callback to handle graph node clicks
+@callback(
+    Output("results-panel", "children", allow_duplicate=True),
+    [Input("rag-graph", "tapNodeData")],
+    [State("retrieval-method", "value"),
+     State("graph-elements-store", "data")],
+    prevent_initial_call=True
+)
+def handle_graph_node_click(node_data, retrieval_method, graph_elements):
+    """Handle clicks on graph nodes to trigger new searches."""
+    if node_data is None:
+        return dash.no_update
+        
+    # Get the clicked node's content
+    node_id = node_data.get('id')
+    if not node_id:
+        return dash.no_update
+        
+    # Find the node in elements
+    node = next((elem for elem in graph_elements if elem['data']['id'] == node_id), None)
+    if not node:
+        return dash.no_update
+        
+    # Get the node's content
+    content = node['data'].get('content', '')
+    if not content:
+        return dash.no_update
+        
+    # Create a document query with metadata
+    doc_query = {
+        'Date': node['data'].get('Date', ''),
+        'Title': node['data'].get('Title', ''),
+        'emotion': node['data'].get('emotion', ''),
+        'topic': node['data'].get('topic', ''),
+        'Tags': node['data'].get('Tags', ''),
+        'Content': content
+    }
+    
+    # Format as a document query string
+    query = f"Date: {doc_query['Date']}\nTitle: {doc_query['Title']}\nEmotion: {doc_query['emotion']}\nTopic: {doc_query['topic']}\nTags: {doc_query['Tags']}\n\nContent: {doc_query['Content']}"
+    
+    # Perform document-based search
+    return perform_search(query, retrieval_method, is_doc_query=True)
 
 if __name__ == "__main__":
     app.run_server(debug=True, port=8051) 

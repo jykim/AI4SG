@@ -116,7 +116,12 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
                 'label': node_label,
                 'content': '\n'.join(query_content),
                 'type': 'query',
-                'emotion_color': '#808080'  # Neutral gray for query node
+                'emotion_color': '#808080',  # Neutral gray for query node
+                'Date': query_metadata.get('Date', ''),
+                'Title': title,
+                'emotion': query_metadata.get('Emotion', ''),
+                'topic': query_metadata.get('Topic', ''),
+                'Tags': tags
             }
         })
     else:
@@ -156,7 +161,11 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
                 'score': score,
                 'type': 'document',
                 'emotion_color': emotion_color,
-                'emotion': emotion  # Store emotion for tooltip
+                'emotion': emotion,  # Store emotion for tooltip
+                'Date': doc.get('Date', ''),
+                'Title': title,
+                'topic': doc.get('topic', ''),
+                'Tags': tags
             }
         })
         
@@ -246,6 +255,9 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
         }
     ]
     
+    # Store the graph elements in debug_info
+    debug_info['graph_elements'] = nodes + edges
+    
     return cyto.Cytoscape(
         id='rag-graph',
         layout={
@@ -277,6 +289,7 @@ def create_graph_panel(debug_info: Dict[str, Any], config: Dict[str, Any]) -> db
     return dbc.Card([
         dbc.CardHeader("RAG Retrieval Graph"),
         dbc.CardBody([
+            html.H4(id='graph-title', children="Click a node to see its details", className="mb-3"),
             create_rag_graph(debug_info, config),
             html.Div([
                 html.H6("Graph Legend", className="mt-3"),
@@ -314,4 +327,24 @@ def create_graph_panel(debug_info: Dict[str, Any], config: Dict[str, Any]) -> db
                 ])
             ])
         ])
-    ]) 
+    ])
+
+@callback(
+    Output('graph-title', 'children'),
+    Input('rag-graph', 'tapNodeData')
+)
+def update_graph_title(node_data):
+    if node_data is None:
+        return "Click a node to see its details"
+    
+    # Get node type and label
+    node_type = node_data.get('type', 'unknown')
+    node_label = node_data.get('label', 'Unknown Node')
+    
+    # Format the title based on node type
+    if node_type == 'query':
+        return f"Query Node: {node_label}"
+    elif node_type == 'document':
+        return f"Document Node: {node_label}"
+    else:
+        return f"Node: {node_label}" 
