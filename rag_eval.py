@@ -18,6 +18,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from rag_utils import JournalRAG
+from ir_utils import BM25Retriever
 
 # Initialize configuration
 def load_config():
@@ -34,31 +35,56 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 # Initialize configuration
 config = load_config()
 
-# Initialize RAG system
+# Add persistence configuration if not present
+if 'bm25' not in config:
+    config['bm25'] = {}
+config['bm25']['persistence'] = {
+    'enabled': True,
+    'directory': 'bm25_index'
+}
+
+# Initialize RAG system and BM25 retriever
 rag = JournalRAG(config)
+bm25_retriever = BM25Retriever(config)
 
 def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
     """Create a debug panel showing RAG retrieval information."""
-    return dbc.Card([
-        dbc.CardHeader("RAG Retrieval Information"),
-        dbc.CardBody([
-            # Query Information
-            html.H5("Query Information", className="mb-3"),
+    retrieval_method = debug_info.get('retrieval_method', 'N/A').upper()
+    
+    # Create metrics section based on retrieval method
+    if retrieval_method == "BM25":
+        metrics_section = html.Div([
+            html.H6("BM25 Metrics", className="mt-4 mb-2"),
             html.Div([
-                html.Strong("Query: "),
-                html.Span(debug_info.get('query', 'N/A')),
-            ], className="mb-2"),
-            html.Div([
-                html.Strong("Total Documents in Index: "),
-                html.Span(str(debug_info.get('total_docs', 0))),
-            ], className="mb-2"),
-            html.Div([
-                html.Strong("Retrieved Documents: "),
-                html.Span(str(debug_info.get('retrieved_docs_count', 0))),
-            ], className="mb-2"),
-            
-            # RAG Timing Metrics
-            html.H6("RAG Timing Metrics", className="mt-4 mb-2"),
+                html.Div([
+                    html.Strong("Total Time: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('total_time', 0):.3f}s"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Documents Retrieved: "),
+                    html.Span(str(debug_info.get('rag_metrics', {}).get('num_docs_retrieved', 0))),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Score Range: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('min_score', 0):.3f} to {debug_info.get('rag_metrics', {}).get('max_score', 0):.3f}"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Index Status: "),
+                    html.Span(debug_info.get('index_status', 'Unknown')),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Indexed Documents: "),
+                    html.Span(str(debug_info.get('indexed_docs', 0))),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Query Tokens: "),
+                    html.Span(debug_info.get('query_tokens', 'N/A')),
+                ], className="mb-2"),
+            ], className="bg-light p-3 rounded mb-3"),
+        ])
+    else:
+        metrics_section = html.Div([
+            html.H6("Vector Search Metrics", className="mt-4 mb-2"),
             html.Div([
                 html.Div([
                     html.Strong("Retrieval Time: "),
@@ -69,7 +95,7 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
                     html.Span(f"{debug_info.get('rag_metrics', {}).get('processing_time', 0):.3f}s"),
                 ], className="mb-2"),
                 html.Div([
-                    html.Strong("Total RAG Time: "),
+                    html.Strong("Total Time: "),
                     html.Span(f"{debug_info.get('rag_metrics', {}).get('total_time', 0):.3f}s"),
                 ], className="mb-2"),
                 html.Div([
@@ -85,8 +111,33 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
                     html.Span(str(debug_info.get('rag_metrics', {}).get('num_chunks', 0))),
                 ], className="mb-2"),
             ], className="bg-light p-3 rounded mb-3"),
-            
-            # Document Diversity Information
+        ])
+    
+    # Create diversity section based on retrieval method
+    if retrieval_method == "BM25":
+        diversity_section = html.Div([
+            html.H6("Document Statistics", className="mt-4 mb-2"),
+            html.Div([
+                html.Div([
+                    html.Strong("Average Score: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('avg_score', 0):.3f}"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Score Standard Deviation: "),
+                    html.Span(f"{debug_info.get('rag_metrics', {}).get('score_std', 0):.3f}"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Index Size: "),
+                    html.Span(f"{debug_info.get('index_size', 0)} tokens"),
+                ], className="mb-2"),
+                html.Div([
+                    html.Strong("Average Document Length: "),
+                    html.Span(f"{debug_info.get('avg_doc_length', 0):.1f} tokens"),
+                ], className="mb-2"),
+            ], className="bg-light p-3 rounded mb-3"),
+        ])
+    else:
+        diversity_section = html.Div([
             html.H6("Document Diversity", className="mt-4 mb-2"),
             html.Div([
                 html.Div([
@@ -99,32 +150,77 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
                     html.Span(f"{sum(1 + doc.get('chunk_index', 0) for doc in debug_info.get('retrieved_documents', [])) / max(1, len(set(doc.get('doc_id', '') for doc in debug_info.get('retrieved_documents', [])))):.2f}"),
                 ], className="mb-2"),
             ], className="bg-light p-3 rounded mb-3"),
-            
-            # Retrieved Documents
-            html.H6("Retrieved Documents", className="mt-4 mb-2"),
+        ])
+    
+    # Format retrieved documents
+    retrieved_docs_section = html.Div([
+        html.H6("Retrieved Documents", className="mt-4 mb-2"),
+        html.Div([
             html.Div([
                 html.Div([
+                    html.Strong(f"Document {i+1} (Score: {doc.get('match_score', 0):.3f})"),
                     html.Div([
-                        html.Strong(f"Document {i+1} (Score: {doc.get('match_score', 0):.3f})"),
                         html.Div([
-                            html.Strong("Date: "), html.Span(doc.get('Date', '')),
-                            html.Br(),
-                            html.Strong("Title: "), html.Span(doc.get('Title', '')),
-                            html.Br(),
-                            html.Strong("Emotion: "), html.Span(doc.get('emotion', '')),
-                            html.Br(),
-                            html.Strong("Topic: "), html.Span(doc.get('topic', '')),
-                            html.Br(),
-                            html.Strong("Tags: "), html.Span(doc.get('Tags', '')),
-                            html.Br(),
-                            html.Strong("Chunk Index: "), html.Span(str(doc.get('chunk_index', 0))),
-                            html.Br(),
-                            html.Strong("Content: "), html.Span(doc.get('Content', '')),
-                        ], className="ml-3 mt-2")
-                    ], className="border-bottom pb-3 mb-3")
-                ])
-                for i, doc in enumerate(debug_info.get('retrieved_documents', []))
-            ]),
+                            html.Strong("Date: "), 
+                            html.Span(doc.get('Date', '')),
+                        ], className="mb-1"),
+                        html.Div([
+                            html.Strong("Title: "), 
+                            html.Span(doc.get('Title', '')),
+                        ], className="mb-1"),
+                        html.Div([
+                            html.Strong("Emotion: "), 
+                            html.Span(doc.get('emotion', '')),
+                        ], className="mb-1"),
+                        html.Div([
+                            html.Strong("Topic: "), 
+                            html.Span(doc.get('topic', '')),
+                        ], className="mb-1"),
+                        html.Div([
+                            html.Strong("Tags: "), 
+                            html.Span(doc.get('Tags', '')),
+                        ], className="mb-1"),
+                        html.Div([
+                            html.Strong("Content: "), 
+                            html.Span(doc.get('Content', '')),
+                        ], className="mb-1"),
+                    ], className="ml-3 mt-2")
+                ], className="border-bottom pb-3 mb-3")
+            ])
+            for i, doc in enumerate(debug_info.get('retrieved_documents', []))
+        ])
+    ])
+    
+    return dbc.Card([
+        dbc.CardHeader("RAG Retrieval Information"),
+        dbc.CardBody([
+            # Query Information
+            html.H5("Query Information", className="mb-3"),
+            html.Div([
+                html.Strong("Query: "),
+                html.Span(debug_info.get('query', 'N/A')),
+            ], className="mb-2"),
+            html.Div([
+                html.Strong("Retrieval Method: "),
+                html.Span(retrieval_method),
+            ], className="mb-2"),
+            html.Div([
+                html.Strong("Total Documents in Index: "),
+                html.Span(str(debug_info.get('total_docs', 0))),
+            ], className="mb-2"),
+            html.Div([
+                html.Strong("Retrieved Documents: "),
+                html.Span(str(debug_info.get('retrieved_docs_count', 0))),
+            ], className="mb-2"),
+            
+            # Metrics Section
+            metrics_section,
+            
+            # Diversity Section
+            diversity_section,
+            
+            # Retrieved Documents Section
+            retrieved_docs_section,
         ])
     ])
 
@@ -140,6 +236,20 @@ def create_query_panel() -> dbc.Card:
     return dbc.Card([
         dbc.CardHeader("Query Interface"),
         dbc.CardBody([
+            # Retrieval Method Selector
+            html.Div([
+                html.H5("Retrieval Method", className="mb-3"),
+                dbc.RadioItems(
+                    id="retrieval-method",
+                    options=[
+                        {"label": "BM25 (Default)", "value": "bm25"},
+                        {"label": "Vector Search", "value": "vector"}
+                    ],
+                    value="bm25",
+                    inline=True,
+                    className="mb-3"
+                ),
+            ]),
             # Keyword Query Section
             html.Div([
                 html.H5("Keyword Query", className="mb-3"),
@@ -275,10 +385,13 @@ def update_random_docs(n_clicks):
      Input({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks')],
     [State("user-input", "value"),
      State({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks'),
-     State({'type': 'doc-content', 'index': dash.ALL}, 'children')]
+     State({'type': 'doc-content', 'index': dash.ALL}, 'children'),
+     State("retrieval-method", "value")]
 )
-def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents):
-    """Handle both keyword search and document-based retrieval."""
+def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents, retrieval_method):
+    """
+    Handle both keyword search and document-based retrieval in the RAG evaluation interface.
+    """
     ctx = dash.callback_context
     if not ctx.triggered:
         return [None]
@@ -292,11 +405,21 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
         error_message = "No journal entries found. Please ensure there are CSV files in the input directory."
         return [html.Div(error_message, className="alert alert-danger")]
     
-    # Initialize vector store if not already initialized
-    if not rag.vector_store:
+    # Initialize retrievers if needed
+    if retrieval_method == "vector" and not rag.vector_store:
         logging.info("Initializing vector store...")
         rag.initialize_vector_store(journal_entries.to_dict('records'))
         logging.info("Vector store initialized")
+    elif retrieval_method == "bm25":
+        # Check if we need to create or update the index
+        if not bm25_retriever.documents:
+            logging.info("Initializing BM25 index...")
+            bm25_retriever.index_documents(journal_entries.to_dict('records'))
+            logging.info("BM25 index initialized")
+        elif len(journal_entries) != len(bm25_retriever.documents):
+            logging.info("Updating BM25 index with new documents...")
+            bm25_retriever.index_documents(journal_entries.to_dict('records'))
+            logging.info("BM25 index updated")
     
     # Get RAG results with timing
     import time
@@ -316,23 +439,122 @@ def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_
         query = doc_contents[clicked_index]
         logging.info("Performing document-based retrieval")
     
-    # Perform RAG retrieval
-    relevant_entries, timing_metrics = rag.get_relevant_entries(query)
-    logging.info(f"Retrieved {len(relevant_entries)} relevant entries")
-    
-    processing_time = time.time() - start_time
-    
-    # Create debug information
-    debug_info = {
-        'query': query,
-        'total_docs': len(journal_entries),
-        'retrieved_docs_count': len(relevant_entries),
-        'retrieved_documents': relevant_entries,
-        'rag_metrics': timing_metrics,
-    }
-    
-    # Create and return results panel
-    return [create_debug_panel(debug_info)]
+    # Perform retrieval based on selected method
+    if retrieval_method == "bm25":
+        try:
+            # Get BM25 index status
+            index_status = "Initialized" if bm25_retriever.documents else "Not Initialized"
+            indexed_docs = len(bm25_retriever.documents) if bm25_retriever.documents else 0
+            
+            # Get query tokens for debugging
+            from bm25s import tokenize
+            query_tokens = tokenize([query], stopwords='en')[0]  # This returns a list of tokens
+            query_tokens_str = ', '.join(str(token) for token in query_tokens)  # Convert each token to string
+            
+            # Get index statistics
+            if bm25_retriever.documents:
+                # Extract content from documents
+                doc_contents = [doc.get('Content', '') for doc in bm25_retriever.documents]
+                total_tokens = sum(len(tokenize([content], stopwords='en')[0]) for content in doc_contents)
+                avg_doc_length = total_tokens / len(bm25_retriever.documents)
+                
+                # Debug: Print document contents
+                logging.info(f"Number of documents in BM25 index: {len(bm25_retriever.documents)}")
+                logging.info(f"First document content: {doc_contents[0][:100]}...")
+                logging.info(f"Query tokens: {query_tokens}")
+            else:
+                total_tokens = 0
+                avg_doc_length = 0
+                logging.warning("No documents in BM25 index!")
+            
+            # Try to get relevant entries with error handling
+            relevant_entries, timing_metrics = bm25_retriever.get_relevant_entries(query)
+            logging.info(f"BM25 retrieval completed. Found {len(relevant_entries)} entries.")
+            
+            # Format relevant entries to ensure all fields are properly handled
+            formatted_entries = []
+            for entry in relevant_entries:
+                formatted_entry = {
+                    'match_score': entry.get('match_score', 0),
+                    'Date': str(entry.get('Date', '')),
+                    'Title': str(entry.get('Title', '')),
+                    'emotion': str(entry.get('emotion', '')),
+                    'topic': str(entry.get('topic', '')),
+                    'Tags': str(entry.get('Tags', '')),
+                    'Content': str(entry.get('Content', ''))
+                }
+                formatted_entries.append(formatted_entry)
+            
+            # Add BM25-specific metrics
+            if relevant_entries:
+                scores = [entry.get('match_score', 0) for entry in relevant_entries]
+                timing_metrics.update({
+                    'min_score': min(scores),
+                    'max_score': max(scores),
+                    'avg_score': sum(scores) / len(scores),
+                    'score_std': (sum((s - sum(scores)/len(scores))**2 for s in scores) / len(scores))**0.5
+                })
+            
+            # Add debug information
+            debug_info = {
+                'query': query,
+                'total_docs': len(journal_entries),
+                'retrieved_docs_count': len(formatted_entries),
+                'retrieved_documents': formatted_entries,
+                'rag_metrics': timing_metrics,
+                'retrieval_method': retrieval_method,
+                'index_status': index_status,
+                'indexed_docs': indexed_docs,
+                'query_tokens': query_tokens_str,
+                'index_size': total_tokens,
+                'avg_doc_length': avg_doc_length,
+                'error_message': None  # Will be updated if there's an error
+            }
+            
+            return [create_debug_panel(debug_info)]
+            
+        except Exception as e:
+            logging.error(f"Error in BM25 processing: {str(e)}")
+            debug_info = {
+                'query': query,
+                'total_docs': len(journal_entries),
+                'retrieved_docs_count': 0,
+                'retrieved_documents': [],
+                'rag_metrics': {},
+                'retrieval_method': retrieval_method,
+                'index_status': "Error",
+                'indexed_docs': 0,
+                'query_tokens': "Error processing query",
+                'index_size': 0,
+                'avg_doc_length': 0,
+                'error_message': str(e)
+            }
+            return [create_debug_panel(debug_info)]
+    else:
+        relevant_entries, timing_metrics = rag.get_relevant_entries(query)
+        # Format relevant entries to ensure all fields are properly handled
+        formatted_entries = []
+        for entry in relevant_entries:
+            formatted_entry = {
+                'match_score': entry.get('match_score', 0),
+                'Date': str(entry.get('Date', '')),
+                'Title': str(entry.get('Title', '')),
+                'emotion': str(entry.get('emotion', '')),
+                'topic': str(entry.get('topic', '')),
+                'Tags': str(entry.get('Tags', '')),
+                'Content': str(entry.get('Content', ''))
+            }
+            formatted_entries.append(formatted_entry)
+            
+        debug_info = {
+            'query': query,
+            'total_docs': len(journal_entries),
+            'retrieved_docs_count': len(formatted_entries),
+            'retrieved_documents': formatted_entries,
+            'rag_metrics': timing_metrics,
+            'retrieval_method': retrieval_method
+        }
+        return [create_debug_panel(debug_info)]
 
 if __name__ == "__main__":
     app.run_server(debug=True, port=8051) 

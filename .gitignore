@@ -13,6 +13,8 @@ api_cache/
 agent_cache/
 output/
 vector_store/
+bm25_index/
+test_bm25_index/
 
 # OS generated files
 .DS_Store

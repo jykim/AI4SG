@@ -27,6 +27,24 @@ exact_match_fields:
   - topic
   - tags
 
+# BM25 Settings
+bm25:
+  k1: 1.5  # Term frequency saturation parameter
+  b: 0.75  # Length normalization parameter
+  tokenizer:
+    lowercase: true  # Whether to convert text to lowercase
+    remove_punctuation: true  # Whether to remove punctuation
+    remove_numbers: false  # Whether to remove numbers
+    min_length: 2  # Minimum token length
+    max_length: 15  # Maximum token length
+    stopwords: "en"  # Use English stopwords from bm25s
+  stemming:
+    enabled: true  # Whether to use stemming
+    language: "english"  # Language for stemming
+  persistence:
+    enabled: true  # Whether to save/load index
+    directory: "bm25_index"  # Directory for saving/loading index
+
 # Logging Settings
 log_level: "INFO"
 log_format: "%(asctime)s - %(levelname)s - %(message)s" 
