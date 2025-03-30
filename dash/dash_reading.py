@@ -4,6 +4,11 @@ A Dash web application for managing and reading text files with encoding support
 Specifically designed for handling Korean text files with various encodings.
 """
 
+import sys
+from pathlib import Path
+# Add parent directory to Python path for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
 import orjson
 import dash
 from dash import html, dcc, dash_table
@@ -17,7 +22,6 @@ import re
 import csv
 from datetime import datetime, timedelta
 import subprocess
-import sys
 import logging
 import random
 
@@ -43,6 +47,9 @@ SOURCE_COLORS = {
     'pocket': '#E91E63',     # Pink
     'Other': '#FFEEAD'       # Light Yellow for any other sources
 }
+
+# Get root directory
+ROOT_DIR = Path(__file__).parent.parent
 
 def run_extraction():
     """Run the extraction script to update reading entries."""
@@ -175,7 +182,7 @@ def get_random_article(df: pd.DataFrame) -> tuple:
 def load_library_data():
     """Load and sort the library catalog with ratings."""
     try:
-        df = pd.read_csv('output/reading_entries.csv')
+        df = pd.read_csv(ROOT_DIR / 'output' / 'reading_entries.csv')
         if df.empty:
             return pd.DataFrame()
             
@@ -202,14 +209,15 @@ def load_ratings():
         Dictionary mapping file paths to ratings
     """
     ratings = {}
+    ratings_file = ROOT_DIR / 'output' / 'reading_ratings.csv'
     try:
-        with open('output/reading_ratings.csv', 'r', encoding='utf-8') as f:
+        with open(ratings_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 ratings[row['file_path']] = int(row['rating'])
     except FileNotFoundError:
         # Create the file with headers if it doesn't exist
-        with open('output/reading_ratings.csv', 'w', encoding='utf-8', newline='') as f:
+        with open(ratings_file, 'w', encoding='utf-8', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=['file_path', 'rating'])
             writer.writeheader()
     return ratings
@@ -225,7 +233,8 @@ def save_rating(file_path, rating):
     ratings = load_ratings()
     ratings[file_path] = rating
     
-    with open('output/reading_ratings.csv', 'w', encoding='utf-8', newline='') as f:
+    ratings_file = ROOT_DIR / 'output' / 'reading_ratings.csv'
+    with open(ratings_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['file_path', 'rating'])
         writer.writeheader()
         for path, r in ratings.items():

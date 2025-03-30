@@ -26,6 +26,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 import json
+import sys
+
+# Add parent directory to Python path for imports
+sys.path.append(str(Path(__file__).parent.parent))
 
 # Third-party imports
 import dash
@@ -37,7 +41,7 @@ import plotly.graph_objects as go
 import yaml
 
 # Local imports
-from agent_utils import get_chat_response, get_todays_chat_log, Config
+from agent_utils import get_chat_response, get_todays_chat_log, Config as AgentConfig
 from chat_utils import (
     parse_message_timestamp,
     extract_message_content,
@@ -48,10 +52,13 @@ from chat_utils import (
     create_chat_history
 )
 
+# Get root directory
+ROOT_DIR = Path(__file__).parent.parent
+
 class Config:
     """Configuration class to manage application settings"""
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[str] = None):
+        self.config_path = config_path or str(ROOT_DIR / "config.yaml")
         self.load_config()
         self.setup_directories()
 
@@ -77,11 +84,11 @@ class Config:
                 ]
             }
         
-        # Set configuration values
-        self.input_dir = Path(config.get('input_dir', 'input'))
-        self.output_dir = Path(config.get('output_dir', 'output'))
-        self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
-        self.agent_cache_dir = Path(config.get('agent_cache_dir', 'agent_cache'))
+        # Set configuration values with absolute paths
+        self.input_dir = ROOT_DIR / config.get('input_dir', 'input')
+        self.output_dir = ROOT_DIR / config.get('output_dir', 'output')
+        self.api_cache_dir = ROOT_DIR / config.get('api_cache_dir', 'api_cache')
+        self.agent_cache_dir = ROOT_DIR / config.get('agent_cache_dir', 'agent_cache')
         self.min_process_interval = config.get('min_process_interval', 600)
         self.max_entries_for_prompt = config.get('max_entries_for_prompt', 10)
         self.max_word_count = config.get('max_word_count', 30)
@@ -101,7 +108,6 @@ class Config:
 
 # Initialize configuration
 config = Config()
-SCRIPT_DIR = Path(__file__).parent.absolute()
 
 # Configure logging
 logging.basicConfig(
@@ -290,12 +296,12 @@ class DashboardState:
 
             # Run extraction
             logging.info("Starting journal extraction and annotation process...")
-            extract_script = SCRIPT_DIR / 'extract_journal.py'
+            extract_script = ROOT_DIR / 'extract_journal.py'
             if not self._run_script(['python', str(extract_script)], env):
                 return False
 
             # Run annotation with the new input file
-            annotate_script = SCRIPT_DIR / 'annotate_journal.py'
+            annotate_script = ROOT_DIR / 'annotate_journal.py'
             cmd = ['python', str(annotate_script), '--input', 'journal_entries.csv']
             if retag_all:
                 cmd.append('--retag-all')
