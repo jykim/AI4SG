@@ -76,7 +76,7 @@ class BM25Retriever:
         # Create a formatted text representation of the entry
         date = entry.get('Date', '')
         time = entry.get('Time', '')
-        title = entry.get('Title', 'Untitled')
+        title = entry.get('Title', '')
         content = entry.get('Content', '')
         emotion = entry.get('emotion', '')
         topic = entry.get('topic', '')
@@ -100,6 +100,7 @@ class BM25Retriever:
             'date': str(date),
             'time': str(time),
             'title': str(title) if pd.notna(title) else 'Untitled',
+            'content': str(content) if pd.notna(content) else '',  # Store original content
             'emotion': str(emotion) if pd.notna(emotion) else '',
             'topic': str(topic) if pd.notna(topic) else '',
             'tags': str(tags) if pd.notna(tags) else '',
@@ -219,7 +220,7 @@ class BM25Retriever:
                     'Date': metadata['date'],
                     'Time': metadata['time'],
                     'Title': metadata['title'],
-                    'Content': doc,  # Use the document text directly
+                    'Content': metadata['content'],  # Use original content from metadata
                     'emotion': metadata['emotion'],
                     'topic': metadata['topic'],
                     'Tags': metadata['tags'],

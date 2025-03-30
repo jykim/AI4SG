@@ -295,15 +295,24 @@ app.layout = dbc.Container([
             ], className="h-100")
         ], width=4),
         
-        # Graph Panel (8 columns)
+        # Graph and Details Panel (8 columns)
         dbc.Col([
+            # Graph Panel
             dbc.Card([
                 dbc.CardHeader("Knowledge Graph"),
                 dbc.CardBody([
-                    dcc.Graph(id="knowledge-graph")
+                    dcc.Graph(id="knowledge-graph", style={'height': '100%'})
                 ])
-            ], className="h-100")
-        ], width=8)
+            ], className="h-50 mb-3", style={'height': '50%'}),
+            
+            # Details Panel
+            dbc.Card([
+                dbc.CardHeader("View Details"),
+                dbc.CardBody([
+                    html.Div(id="details-content", className="p-3")
+                ])
+            ], className="h-50", style={'height': '50%'})
+        ], width=8, style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
     ], className="h-100")
 ], fluid=True, className="vh-100")
 
@@ -321,14 +330,12 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
     return dbc.Card([
         dbc.CardBody([
             # Title (clickable)
-            html.H5(
-                dcc.Link(
-                    doc.get('Title', 'Untitled'),
-                    href="#",
-                    id={'type': 'result-title', 'index': index},
-                    className="text-primary"
-                ),
-                className="mb-1"
+            html.Button(
+                doc.get('Title', 'Untitled'),
+                id={'type': 'result-title', 'index': index},
+                className="btn btn-link text-primary p-0 text-start",
+                style={'text-decoration': 'none', 'font-size': '1.25rem', 'font-weight': '500'},
+                n_clicks=0
             ),
             
             # Content preview
@@ -364,6 +371,50 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
         ])
     ], className="mb-3")
 
+def create_details_content(doc: Dict[str, Any]) -> html.Div:
+    """Create the details content for a selected document."""
+    # Format metadata
+    metadata = []
+    if doc.get('Date'):
+        metadata.append(f"Date: {doc.get('Date')}")
+    if doc.get('doc_type'):
+        metadata.append(f"Type: {doc.get('doc_type')}")
+    if doc.get('emotion'):
+        metadata.append(f"Emotion: {doc.get('emotion')}")
+    if doc.get('topic'):
+        metadata.append(f"Topic: {doc.get('topic')}")
+    if doc.get('Tags'):
+        metadata.append(f"Tags: {doc.get('Tags')}")
+    if doc.get('author'):
+        metadata.append(f"Author: {doc.get('author')}")
+    if doc.get('source'):
+        metadata.append(f"Source: {doc.get('source')}")
+    if doc.get('match_score'):
+        metadata.append(f"Match Score: {doc.get('match_score'):.3f}")
+    
+    return html.Div([
+        # Title
+        html.H2(doc.get('Title', 'Untitled'), className="mb-3"),
+        
+        # Metadata
+        html.Div([
+            html.Small(meta, className="text-muted me-3") for meta in metadata
+        ], className="mb-4"),
+        
+        # Content with preserved newlines
+        html.Pre(
+            doc.get('Content', ''),
+            className="mt-3 mb-0",
+            style={
+                'whiteSpace': 'pre-wrap',
+                'fontFamily': 'inherit',
+                'fontSize': '1rem',
+                'lineHeight': '1.5',
+                'margin': '0'
+            }
+        )
+    ])
+
 # Callback to handle search
 @callback(
     [Output("search-results-list", "children"),
@@ -379,8 +430,10 @@ def handle_search(n_clicks, n_submit, query, doc_type):
         return [], {
             'data': [],
             'layout': {
-                'title': 'Knowledge Graph',
-                'showlegend': True
+                'title': 'Type in query to see graph',
+                'showlegend': False,
+                'xaxis': {'visible': False},
+                'yaxis': {'visible': False}
             }
         }
         
@@ -509,6 +562,33 @@ def handle_search(n_clicks, n_submit, query, doc_type):
         }
     
     return result_items, graph_figure
+
+# Callback to handle title clicks
+@callback(
+    Output("details-content", "children"),
+    [Input({'type': 'result-title', 'index': dash.ALL}, 'n_clicks')],
+    [State({'type': 'result-data', 'index': dash.ALL}, 'children')]
+)
+def handle_title_click(n_clicks_list, data_list):
+    """Handle clicks on search result titles and update the details panel."""
+    if not n_clicks_list or not data_list:
+        return html.Div("Select a search result to view details")
+        
+    # Find the clicked index
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return html.Div("Select a search result to view details")
+        
+    # Get the clicked index from the triggered prop_id
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    triggered_id = json.loads(triggered_id)
+    clicked_index = triggered_id['index']
+    
+    # Get the document data
+    doc_data = json.loads(data_list[clicked_index])
+    
+    # Create and return the details content
+    return create_details_content(doc_data)
 
 if __name__ == "__main__":
     # Initialize the knowledge graph
