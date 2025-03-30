@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 import dash
 from dash import html, dcc, Input, Output, State, callback
 import dash_bootstrap_components as dbc
+import dash_cytoscape as cyto
 import pandas as pd
 import yaml
 import logging
@@ -22,6 +23,9 @@ import json
 from datetime import datetime
 
 from ir_utils import BM25Retriever
+
+# Register Cytoscape component
+cyto.load_extra_layouts()
 
 # Initialize configuration
 def load_config():
@@ -248,12 +252,6 @@ kg = KnowledgeGraph(config)
 # App layout
 app.layout = dbc.Container([
     dbc.Row([
-        dbc.Col([
-            html.H1("Knowledge Graph Explorer", className="text-center mb-4")
-        ])
-    ]),
-    
-    dbc.Row([
         # Search Panel (4 columns)
         dbc.Col([
             dbc.Card([
@@ -301,9 +299,98 @@ app.layout = dbc.Container([
             dbc.Card([
                 dbc.CardHeader("Knowledge Graph"),
                 dbc.CardBody([
-                    dcc.Graph(id="knowledge-graph", style={'height': '100%'})
+                    cyto.Cytoscape(
+                        id='knowledge-graph',
+                        layout={
+                            'name': 'cose',
+                            'idealEdgeLength': 150,
+                            'refresh': 20,
+                            'fit': True,
+                            'padding': 30,
+                            'zoom': 1.5  # Increase default zoom level
+                        },
+                        style={'width': '100%', 'height': '100%'},
+                        elements=[],
+                        stylesheet=[
+                            # Query node style
+                            {
+                                'selector': 'node[type="query"]',
+                                'style': {
+                                    'background-color': '#ff0000',
+                                    'label': 'data(label)',
+                                    'text-valign': 'center',
+                                    'text-halign': 'center',
+                                    'width': 120,
+                                    'height': 60,
+                                    'font-size': 12,
+                                    'font-weight': 'bold',
+                                    'text-wrap': 'wrap',
+                                    'text-max-width': 110,
+                                    'color': '#ffffff',
+                                    'text-outline-color': '#000000',
+                                    'text-outline-width': 2
+                                }
+                            },
+                            # Document node style
+                            {
+                                'selector': 'node[type="document"]',
+                                'style': {
+                                    'background-color': '#1f77b4',
+                                    'label': 'data(label)',
+                                    'text-valign': 'center',
+                                    'text-halign': 'center',
+                                    'width': 120,
+                                    'height': 60,
+                                    'font-size': 12,
+                                    'text-wrap': 'wrap',
+                                    'text-max-width': 110,
+                                    'color': '#ffffff',
+                                    'text-outline-color': '#000000',
+                                    'text-outline-width': 2
+                                }
+                            },
+                            # Edge style
+                            {
+                                'selector': 'edge',
+                                'style': {
+                                    'width': 1,
+                                    'line-color': '#666',
+                                    'target-arrow-color': '#666',
+                                    'target-arrow-shape': 'triangle',
+                                    'curve-style': 'bezier',
+                                    'label': 'data(weight)',
+                                    'font-size': 10,
+                                    'text-outline-color': '#ffffff',
+                                    'text-outline-width': 1
+                                }
+                            },
+                            # Hover styles
+                            {
+                                'selector': 'node:selected',
+                                'style': {
+                                    'background-color': '#ffd700',
+                                    'width': 130,
+                                    'height': 70,
+                                    'color': '#000000',
+                                    'text-outline-color': '#ffffff',
+                                    'text-outline-width': 2
+                                }
+                            },
+                            {
+                                'selector': 'edge:selected',
+                                'style': {
+                                    'line-color': '#ffd700',
+                                    'target-arrow-color': '#ffd700',
+                                    'width': 3
+                                }
+                            }
+                        ],
+                        userZoomingEnabled=True,
+                        userPanningEnabled=True,
+                        boxSelectionEnabled=True
+                    )
                 ])
-            ], className="h-50 mb-3", style={'height': '50%'}),
+            ], className="h-70 mb-3", style={'height': '70%'}),
             
             # Details Panel
             dbc.Card([
@@ -311,7 +398,7 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     html.Div(id="details-content", className="p-3")
                 ])
-            ], className="h-50", style={'height': '50%'})
+            ], className="h-30", style={'height': '30%'})
         ], width=8, style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
     ], className="h-100")
 ], fluid=True, className="vh-100")
@@ -415,10 +502,66 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
         )
     ])
 
+def create_graph_elements(query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Create Cytoscape graph elements from query and results."""
+    elements = []
+    
+    # Add query node
+    query_keywords = query.strip().split()
+    query_node = f"Query: {' '.join(query_keywords)}"
+    
+    elements.append({
+        'data': {
+            'id': 'query',
+            'label': query_node,
+            'type': 'query',
+            'content': query
+        }
+    })
+    
+    # Add document nodes and edges
+    for i, doc in enumerate(results):
+        doc_id = f'doc_{i}'
+        
+        # Get title and format label
+        title = doc.get('Title', 'Untitled')
+        doc_type = doc.get('doc_type', 'journal')
+        date = doc.get('Date', '')
+        
+        # Create label with title and date for journal entries
+        label = f"{title} ({date})" if doc_type == 'journal' and date else title
+        
+        # Add document node
+        elements.append({
+            'data': {
+                'id': doc_id,
+                'label': label,
+                'type': 'document',
+                'content': doc.get('Content', ''),
+                'doc_type': doc_type,
+                'Date': date,
+                'Title': title,
+                'emotion': doc.get('emotion', ''),
+                'topic': doc.get('topic', ''),
+                'Tags': doc.get('Tags', '')
+            }
+        })
+        
+        # Add edge from query to document
+        elements.append({
+            'data': {
+                'source': 'query',
+                'target': doc_id,
+                'weight': f"{doc.get('match_score', 0):.3f}"
+            }
+        })
+    
+    return elements
+
 # Callback to handle search
 @callback(
     [Output("search-results-list", "children"),
-     Output("knowledge-graph", "figure")],
+     Output("knowledge-graph", "elements")],
     [Input("search-button", "n_clicks"),
      Input("search-input", "n_submit")],
     [State("search-input", "value"),
@@ -427,15 +570,7 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
 def handle_search(n_clicks, n_submit, query, doc_type):
     """Handle search queries and update both the results list and graph visualization."""
     if not query:
-        return [], {
-            'data': [],
-            'layout': {
-                'title': 'Type in query to see graph',
-                'showlegend': False,
-                'xaxis': {'visible': False},
-                'yaxis': {'visible': False}
-            }
-        }
+        return [], []
         
     # Perform search with document type filter
     results = kg.search(query, doc_type=doc_type)
@@ -443,152 +578,166 @@ def handle_search(n_clicks, n_submit, query, doc_type):
     # Create search result items for the list
     result_items = [create_search_result_item(doc, i) for i, doc in enumerate(results)]
     
-    # Create graph visualization
-    if results:
-        # Extract keywords from query (simple space-based splitting for now)
-        query_keywords = query.strip().split()
-        query_node = f"Query: {' '.join(query_keywords)}"
-        
-        # Create nodes and edges
-        nodes_x = []  # X coordinates
-        nodes_y = []  # Y coordinates
-        node_labels = []  # Node text labels
-        node_colors = []  # Node colors
-        node_shapes = []  # Node shapes
-        edge_x = []  # Edge X coordinates
-        edge_y = []  # Edge Y coordinates
-        edge_weights = []  # Edge weights for line width
-        
-        # Add center (query) node
-        nodes_x.append(0)
-        nodes_y.append(0)
-        node_labels.append(query_node)
-        node_colors.append('red')  # Query node in red
-        node_shapes.append('circle')  # Query node as circle
-        
-        # Add document nodes in a circle around the query node
-        import math
-        radius = 1
-        for i, doc in enumerate(results):
-            angle = (2 * math.pi * i) / len(results)
-            x = radius * math.cos(angle)
-            y = radius * math.sin(angle)
-            
-            # Add document node
-            nodes_x.append(x)
-            nodes_y.append(y)
-            
-            # Format title with line breaks
-            title = doc.get('Title', 'Untitled')
-            words = title.split()
-            if len(words) > 4:
-                # Insert line break after every 4 words
-                title = '<br>'.join([' '.join(words[i:i+4]) for i in range(0, len(words), 4)])
-            
-            # Add date for journal entries
-            doc_type = doc.get('doc_type', 'journal')
-            date = doc.get('Date', '')
-            if doc_type == 'journal' and date:
-                node_labels.append(f"{title}<br>{date}")
-            else:
-                node_labels.append(title)
-                
-            node_colors.append('blue')  # Document nodes in blue
-            node_shapes.append('square' if doc_type == 'reading' else 'circle')
-            
-            # Add edge between query and document
-            edge_x.extend([0, x, None])  # None creates a break in the line
-            edge_y.extend([0, y, None])
-            edge_weights.append(doc.get('match_score', 0))
-        
-        # Create the graph figure
-        graph_figure = {
-            'data': [
-                # Nodes
-                {
-                    'x': nodes_x,
-                    'y': nodes_y,
-                    'mode': 'markers+text',
-                    'marker': {
-                        'size': 20,
-                        'color': node_colors,
-                        'symbol': node_shapes
-                    },
-                    'text': node_labels,
-                    'textposition': 'bottom center',
-                    'hoverinfo': 'text',
-                    'name': 'Nodes'
-                },
-                # Edges
-                {
-                    'x': edge_x,
-                    'y': edge_y,
-                    'mode': 'lines',
-                    'line': {
-                        'width': 1,
-                        'color': '#888'
-                    },
-                    'hoverinfo': 'none',
-                    'name': 'Edges'
-                }
-            ],
-            'layout': {
-                'title': 'Knowledge Graph Visualization',
-                'showlegend': True,
-                'hovermode': 'closest',
-                'xaxis': {
-                    'showgrid': False,
-                    'zeroline': False,
-                    'showticklabels': False,
-                    'range': [-1.5, 1.5]  # Extend axis range to accommodate labels
-                },
-                'yaxis': {
-                    'showgrid': False,
-                    'zeroline': False,
-                    'showticklabels': False,
-                    'range': [-1.5, 1.5]  # Extend axis range to accommodate labels
-                },
-                'margin': {'b': 60, 't': 40, 'l': 60, 'r': 60}  # Increase margins to prevent text cutoff
-            }
-        }
-    else:
-        # Empty graph if no results
-        graph_figure = {
-            'data': [],
-            'layout': {
-                'title': 'No Results Found',
-                'showlegend': True
-            }
-        }
+    # Create graph elements
+    graph_elements = create_graph_elements(query, results)
     
-    return result_items, graph_figure
+    return result_items, graph_elements
 
-# Callback to handle title clicks
+# Callback to handle node clicks
 @callback(
-    Output("details-content", "children"),
-    [Input({'type': 'result-title', 'index': dash.ALL}, 'n_clicks')],
-    [State({'type': 'result-data', 'index': dash.ALL}, 'children')]
+    [Output("knowledge-graph", "elements", allow_duplicate=True),
+     Output("details-content", "children", allow_duplicate=True)],
+    [Input("knowledge-graph", "tapNodeData")],
+    [State("knowledge-graph", "elements")],
+    prevent_initial_call=True
 )
-def handle_title_click(n_clicks_list, data_list):
-    """Handle clicks on search result titles and update the details panel."""
-    if not n_clicks_list or not data_list:
-        return html.Div("Select a search result to view details")
+def handle_node_click(node_data, current_elements):
+    """Handle clicks on graph nodes to expand the graph with related documents."""
+    if not node_data:
+        return current_elements, dash.no_update
         
-    # Find the clicked index
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return html.Div("Select a search result to view details")
+    # Get the clicked node's content
+    node_id = node_data.get('id')
+    if not node_id or node_id == 'query':
+        return current_elements, dash.no_update
         
-    # Get the clicked index from the triggered prop_id
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    triggered_id = json.loads(triggered_id)
-    clicked_index = triggered_id['index']
+    # Find the node in elements
+    node = next((elem for elem in current_elements if elem['data']['id'] == node_id), None)
+    if not node:
+        return current_elements, dash.no_update
+        
+    # Get the node's content
+    title = node['data'].get('Title', '')
+    content = node['data'].get('content', '')
+    query = f"{title} {content}"
     
-    # Get the document data
-    doc_data = json.loads(data_list[clicked_index])
+    if not query.strip():
+        return current_elements, dash.no_update
+        
+    # Perform search using combined query
+    results = kg.search(query, top_k=5)  # Limit to 5 related documents
     
+    # Get existing document titles in the graph
+    existing_titles = {
+        elem['data'].get('Title', '').strip()
+        for elem in current_elements
+        if elem['data'].get('type') == 'document'
+    }
+    
+    # Filter out documents that are already in the graph
+    results = [
+        doc for doc in results 
+        if doc.get('Title', '').strip() not in existing_titles
+    ]
+    
+    if not results:
+        return current_elements, dash.no_update
+        
+    # Create new elements for related documents
+    new_elements = []
+    
+    # Keep existing nodes and edges
+    for elem in current_elements:
+        if elem['data'].get('id') != node_id:  # Skip the clicked node
+            new_elements.append(elem)
+    
+    # Add the clicked node as a query node (red)
+    new_elements.append({
+        'data': {
+            'id': node_id,
+            'label': title,
+            'type': 'query',
+            'content': content,
+            'doc_type': node['data'].get('doc_type', ''),
+            'Date': node['data'].get('Date', ''),
+            'Title': title,
+            'emotion': node['data'].get('emotion', ''),
+            'topic': node['data'].get('topic', ''),
+            'Tags': node['data'].get('Tags', '')
+        }
+    })
+    
+    # Add related document nodes and edges
+    for i, doc in enumerate(results):
+        doc_id = f'doc_{len(new_elements)}'
+        
+        # Get title and format label
+        title = doc.get('Title', 'Untitled')
+        doc_type = doc.get('doc_type', 'journal')
+        date = doc.get('Date', '')
+        
+        # Create label with title and date for journal entries
+        label = f"{title} ({date})" if doc_type == 'journal' and date else title
+        
+        # Add document node
+        new_elements.append({
+            'data': {
+                'id': doc_id,
+                'label': label,
+                'type': 'document',
+                'content': doc.get('Content', ''),
+                'doc_type': doc_type,
+                'Date': date,
+                'Title': title,
+                'emotion': doc.get('emotion', ''),
+                'topic': doc.get('topic', ''),
+                'Tags': doc.get('Tags', '')
+            }
+        })
+        
+        # Add edge from clicked node to document
+        new_elements.append({
+            'data': {
+                'source': node_id,
+                'target': doc_id,
+                'weight': f"{doc.get('match_score', 0):.3f}"
+            }
+        })
+    
+    # Create details content for the clicked node
+    details_content = create_details_content({
+        'Title': node['data'].get('Title', ''),
+        'Content': node['data'].get('content', ''),
+        'Date': node['data'].get('Date', ''),
+        'doc_type': node['data'].get('doc_type', ''),
+        'emotion': node['data'].get('emotion', ''),
+        'topic': node['data'].get('topic', ''),
+        'Tags': node['data'].get('Tags', '')
+    })
+    
+    return new_elements, details_content
+
+# Callback to handle hover events
+@callback(
+    Output("details-content", "children", allow_duplicate=True),
+    [Input("knowledge-graph", "mouseoverNodeData")],
+    [State("knowledge-graph", "elements")],
+    prevent_initial_call=True
+)
+def handle_graph_hover(node_data, current_elements):
+    """Handle hover events on graph nodes to show document details."""
+    if not node_data:
+        return html.Div("Hover over a node to view details")
+        
+    # Find the node in elements
+    node_id = node_data.get('id')
+    if not node_id:
+        return html.Div("Hover over a node to view details")
+        
+    node = next((elem for elem in current_elements if elem['data']['id'] == node_id), None)
+    if not node:
+        return html.Div("Hover over a node to view details")
+        
     # Create and return the details content
-    return create_details_content(doc_data)
+    return create_details_content({
+        'Title': node['data'].get('Title', ''),
+        'Content': node['data'].get('content', ''),
+        'Date': node['data'].get('Date', ''),
+        'doc_type': node['data'].get('doc_type', ''),
+        'emotion': node['data'].get('emotion', ''),
+        'topic': node['data'].get('topic', ''),
+        'Tags': node['data'].get('Tags', '')
+    })
 
 if __name__ == "__main__":
     # Initialize the knowledge graph
