@@ -316,6 +316,9 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
     # Get match score
     match_score = doc.get('match_score', 0)
     
+    # Get document type
+    doc_type = doc.get('doc_type', 'NO_TYPE_FOUND')
+    
     return dbc.Card([
         dbc.CardBody([
             # Title (clickable)
@@ -340,7 +343,7 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
                 # Left column: Date and Type
                 html.Div([
                     html.Small(f"Date: {date_str}", className="text-muted d-block"),
-                    html.Small(f"Type: {doc.get('doc_type', '')}", className="text-muted d-block"),
+                    html.Small(f"Type: {doc_type}", className="text-muted d-block"),
                 ], className="float-start"),
                 
                 # Right column: Score and Tags

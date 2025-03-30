@@ -57,8 +57,8 @@ class BM25Retriever:
             except Exception as e:
                 logging.warning(f"Failed to initialize stemmer: {e}")
         
-        self.documents = []
-        self.metadata = []
+        self.documents = []  # Document texts for BM25
+        self.metadata = []   # Document metadata (includes doc_type)
         
         # Configure logging
         logging.basicConfig(
@@ -70,7 +70,7 @@ class BM25Retriever:
         persistence_config = self.bm25_config.get('persistence', {})
         if persistence_config.get('enabled', False):
             self._load_index(persistence_config.get('directory', 'bm25_index'))
-        
+    
     def _create_document(self, entry: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Convert a journal entry to a document with metadata"""
         # Create a formatted text representation of the entry
@@ -81,6 +81,7 @@ class BM25Retriever:
         emotion = entry.get('emotion', '')
         topic = entry.get('topic', '')
         tags = entry.get('Tags', '')
+        doc_type = entry.get('doc_type', '')  # Get doc_type from entry
         
         text = f"""
         Date: {date} {time}
@@ -88,6 +89,7 @@ class BM25Retriever:
         Emotion: {emotion}
         Topic: {topic}
         Tags: {tags}
+        Type: {doc_type}
         
         Content:
         {content}
@@ -100,7 +102,8 @@ class BM25Retriever:
             'title': str(title) if pd.notna(title) else 'Untitled',
             'emotion': str(emotion) if pd.notna(emotion) else '',
             'topic': str(topic) if pd.notna(topic) else '',
-            'tags': str(tags) if pd.notna(tags) else ''
+            'tags': str(tags) if pd.notna(tags) else '',
+            'doc_type': str(doc_type) if pd.notna(doc_type) else ''  # Add doc_type to metadata
         }
         
         return text, metadata
@@ -222,7 +225,8 @@ class BM25Retriever:
                     'Tags': metadata['tags'],
                     'match_score': float(score),
                     'doc_id': f"{metadata['date']}_{metadata['title']}",
-                    'match_type': 'bm25'
+                    'match_type': 'bm25',
+                    'doc_type': metadata['doc_type']  # Get doc_type from metadata
                 }
                 relevant_entries.append(entry)
             
