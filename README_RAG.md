@@ -91,6 +91,33 @@ The interface provides detailed timing information for each component:
    - Documents with multiple chunks
    - Chunks filtered due to limits
 
+## Callback Structure
+
+The RAG evaluation interface uses a complex callback structure to handle user interactions and display results. Here's a visualization of the callback flow:
+
+![RAG Callback Structure](media/callback_rag.svg)
+
+The callback structure consists of two main callbacks:
+
+1. `handle_search_and_result_retrieval`:
+   - Handles both keyword search and result-based retrieval
+   - Takes input from user text input and retrieval result clicks
+   - Updates both the results panel and retrieval results list
+   - Manages the display of debug information and retrieved documents
+
+2. `handle_graph_node_click`:
+   - Handles interactions with the graph visualization
+   - Triggers new searches when graph nodes are clicked
+   - Updates the results panel with new retrieval results
+
+The callbacks work together to provide an interactive interface where users can:
+- Enter keyword queries
+- Click on retrieval results
+- Interact with the graph visualization
+- View detailed debug information and retrieved documents
+
+Each interaction triggers appropriate updates to the interface components while maintaining state and providing feedback to the user.
+
 ## Usage
 
 1. Configure RAG parameters in `config_rag.yaml`:

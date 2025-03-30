@@ -82,7 +82,7 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
         return cyto.Cytoscape(
             id='rag-graph',
             layout={'name': 'grid'},
-            style={'width': '100%', 'height': '400px'},
+            style={'width': '100%', 'height': '600px'},  # Increased height by 50%
             elements=[],
             stylesheet=[],
             userZoomingEnabled=True,
@@ -284,7 +284,7 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
             'fit': True,
             'padding': 30
         },
-        style={'width': '100%', 'height': '400px'},
+        style={'width': '100%', 'height': '600px'},  # Increased height by 50%
         elements=nodes + edges,
         stylesheet=stylesheet,
         userZoomingEnabled=True,
@@ -306,62 +306,6 @@ def create_graph_panel(debug_info: Dict[str, Any], config: Dict[str, Any]) -> db
     return dbc.Card([
         dbc.CardHeader("RAG Retrieval Graph"),
         dbc.CardBody([
-            html.H4(id='graph-title', children="Click a node to see its details", className="mb-3"),
-            create_rag_graph(debug_info, config),
-            html.Div([
-                html.H6("Graph Legend", className="mt-3"),
-                html.Div([
-                    html.Div([
-                        html.Div(style={
-                            'width': '20px',
-                            'height': '20px',
-                            'background-color': '#808080',
-                            'display': 'inline-block',
-                            'margin-right': '10px'
-                        }),
-                        html.Span("Query Node")
-                    ], className="mb-2"),
-                    html.Div([
-                        html.Div(style={
-                            'width': '20px',
-                            'height': '20px',
-                            'background-color': '#1f77b4',
-                            'display': 'inline-block',
-                            'margin-right': '10px'
-                        }),
-                        html.Span("Document Node (Color reflects emotion)")
-                    ], className="mb-2"),
-                    html.Div([
-                        html.Div(style={
-                            'width': '2px',
-                            'height': '20px',
-                            'background-color': '#666',
-                            'display': 'inline-block',
-                            'margin-right': '10px'
-                        }),
-                        html.Span("Edge Weight (Match Score)")
-                    ])
-                ])
-            ])
+            create_rag_graph(debug_info, config)
         ])
-    ])
-
-@callback(
-    Output('graph-title', 'children'),
-    Input('rag-graph', 'tapNodeData')
-)
-def update_graph_title(node_data):
-    if node_data is None:
-        return "Click a node to see its details"
-    
-    # Get node type and label
-    node_type = node_data.get('type', 'unknown')
-    node_label = node_data.get('label', 'Unknown Node')
-    
-    # Format the title based on node type
-    if node_type == 'query':
-        return f"Query Node: {node_label}"
-    elif node_type == 'document':
-        return f"Document Node: {node_label}"
-    else:
-        return f"Node: {node_label}" 
+    ]) 
