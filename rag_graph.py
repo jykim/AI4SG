@@ -10,7 +10,7 @@ import dash
 from dash import html, dcc, Input, Output, State, callback
 import dash_cytoscape as cyto
 import dash_bootstrap_components as dbc
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 import logging
 import pandas as pd
 from pathlib import Path
@@ -18,15 +18,17 @@ from pathlib import Path
 # Register Cytoscape component
 cyto.load_extra_layouts()
 
-def load_emotion_colors(config: Dict[str, Any]) -> Dict[str, str]:
+def load_document_data(config: Dict[str, Any]) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
-    Load emotion colors from the annotated CSV file.
+    Load emotion colors and document contents from the annotated CSV file.
     
     Args:
         config: Configuration dictionary containing output_dir
         
     Returns:
-        Dictionary mapping emotions to their colors
+        Tuple containing:
+        - Dictionary mapping emotions to their colors
+        - Dictionary mapping docIDs to their contents
     """
     try:
         # Look for the annotated CSV file in the output directory
@@ -34,9 +36,9 @@ def load_emotion_colors(config: Dict[str, Any]) -> Dict[str, str]:
         annotated_file = output_dir / 'journal_entries_annotated.csv'
         if not annotated_file.exists():
             logging.warning(f"No annotated journal entries found in {output_dir}")
-            return {}
+            return {}, {}
         
-        logging.info(f"Loading emotion colors from {annotated_file}")
+        logging.info(f"Loading emotion colors and document contents from {annotated_file}")
         
         # Read the CSV file
         df = pd.read_csv(annotated_file)
@@ -49,11 +51,21 @@ def load_emotion_colors(config: Dict[str, Any]) -> Dict[str, str]:
             if emotion and color and pd.notna(emotion) and pd.notna(color):
                 emotion_colors[emotion] = color
         
-        logging.info(f"Loaded {len(emotion_colors)} emotion colors")
-        return emotion_colors
+        # Create docID to content mapping
+        doc_contents = {}
+        for _, row in df.iterrows():
+            date = str(row.get('Date', ''))
+            title = str(row.get('Title', ''))
+            content = str(row.get('Content', ''))
+            if date and title and content and pd.notna(date) and pd.notna(title) and pd.notna(content):
+                doc_id = f"{date}_{title}"
+                doc_contents[doc_id] = content
+        
+        logging.info(f"Loaded {len(emotion_colors)} emotion colors and {len(doc_contents)} document contents")
+        return emotion_colors, doc_contents
     except Exception as e:
-        logging.error(f"Error loading emotion colors: {e}")
-        return {}
+        logging.error(f"Error loading emotion colors and document contents: {e}")
+        return {}, {}
 
 def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto.Cytoscape:
     """
@@ -78,8 +90,8 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
             boxSelectionEnabled=True
         )
     
-    # Load emotion colors
-    emotion_colors = load_emotion_colors(config)
+    # Load emotion colors and document contents
+    emotion_colors, doc_contents = load_document_data(config)
     
     # Create nodes and edges
     nodes = []
@@ -149,6 +161,11 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
         emotion = doc.get('emotion', '')
         emotion_color = emotion_colors.get(emotion, '#1f77b4')  # Default blue if no emotion color
         
+        # Get document content from doc_contents if available
+        date = doc.get('Date', '')
+        full_doc_id = f"{date}_{title}"
+        content = doc_contents.get(full_doc_id, doc.get('Content', ''))
+        
         # Create node label with title and tags
         node_label = f"{title[:20]}{'...' if len(title) > 20 else ''}\n{tags}"
         
@@ -157,12 +174,12 @@ def create_rag_graph(debug_info: Dict[str, Any], config: Dict[str, Any]) -> cyto
             'data': {
                 'id': doc_id,
                 'label': node_label,
-                'content': doc.get('Content', ''),
+                'content': content,
                 'score': score,
                 'type': 'document',
                 'emotion_color': emotion_color,
                 'emotion': emotion,  # Store emotion for tooltip
-                'Date': doc.get('Date', ''),
+                'Date': date,
                 'Title': title,
                 'topic': doc.get('topic', ''),
                 'Tags': tags

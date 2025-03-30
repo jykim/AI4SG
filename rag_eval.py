@@ -19,7 +19,7 @@ from typing import Dict, List, Any, Optional
 
 from rag_utils import JournalRAG
 from ir_utils import BM25Retriever
-from rag_graph import create_graph_panel
+from rag_graph import create_graph_panel, load_document_data
 
 # Initialize configuration
 def load_config():
@@ -227,12 +227,19 @@ def create_debug_panel(debug_info: Dict[str, Any]) -> dbc.Card:
         data=debug_info.get('graph_elements', [])
     )
     
+    # Create a hidden div to store debug info
+    debug_info_store = dcc.Store(
+        id='debug-info',
+        data=debug_info.get('retrieved_documents', [])
+    )
+    
     return dbc.Card([
         dbc.CardHeader("RAG Retrieval Information"),
         dbc.CardBody([
             # Graph Visualization
             graph_panel,
             elements_store,  # Add the store component
+            debug_info_store,  # Add the debug info store
             
             # Query Information
             html.H5("Query Information", className="mb-3"),
@@ -305,44 +312,76 @@ def create_query_panel() -> dbc.Card:
                     dbc.Button("Search", id="search-button", color="primary")
                 ]),
             ]),
-            # Document Query Section
+            # Retrieval Results Section
             html.Div([
-                html.H5("Document Query", className="mt-4 mb-3"),
-                html.Div(id="random-docs-list", className="list-group")
+                html.H5("Retrieval Results", className="mt-4 mb-3"),
+                html.Div(id="retrieval-results-list", className="list-group")
             ])
         ])
     ], className="h-100")
 
-def create_random_doc_item(doc: Dict[str, Any], index: int) -> html.Div:
-    """Create a clickable random document item."""
-    content = doc.get('Content', '')
-    # Handle NaN values
-    if pd.isna(content):
-        content = ''
-    content = str(content)
+def create_retrieval_result_item(doc: Dict[str, Any], index: int, doc_contents: Dict[str, str] = None) -> html.Div:
+    """Create a clickable retrieval result item."""
+    # Format date to YYYY-MM-DD
+    date_str = doc.get('Date', '')
+    try:
+        date = pd.to_datetime(date_str)
+        formatted_date = date.strftime('%Y-%m-%d')
+    except:
+        formatted_date = date_str
+    
+    # Get document content from doc_contents if available
+    title = doc.get('Title', '')
+    full_doc_id = f"{formatted_date}_{title}"
+    content = doc_contents.get(full_doc_id, doc.get('Content', '')) if doc_contents else doc.get('Content', '')
     
     # Create metadata string for query
     metadata = {
-        'date': doc.get('Date', ''),
-        'title': doc.get('Title', ''),
+        'date': formatted_date,
+        'title': title,
         'emotion': doc.get('emotion', ''),
         'topic': doc.get('topic', ''),
-        'tags': doc.get('Tags', '')
+        'tags': doc.get('Tags', ''),
+        'content': content
     }
-    metadata_str = f"Date: {metadata['date']}\nTitle: {metadata['title']}\nEmotion: {metadata['emotion']}\nTopic: {metadata['topic']}\nTags: {metadata['tags']}\n\nContent: {content}"
+    
+    # Handle NaN values
+    for key in metadata:
+        if pd.isna(metadata[key]):
+            metadata[key] = ''
+        metadata[key] = str(metadata[key])
+    
+    metadata_str = f"Date: {metadata['date']}\nTitle: {metadata['title']}\nEmotion: {metadata['emotion']}\nTopic: {metadata['topic']}\nTags: {metadata['tags']}\n\nContent: {metadata['content']}"
     
     return html.Div([
         html.Div([
-            html.Strong(f"{doc.get('Date', '')} - {doc.get('Title', '')}"),
-            html.Br(),
-            html.Small(content[:100] + '...' if len(content) > 100 else content),
-            # Store the full content and metadata in a hidden div
-            html.Div(metadata_str, 
-                    id={'type': 'doc-content', 'index': index},
-                    style={'display': 'none'})
-        ], className="list-group-item list-group-item-action", 
-           id={'type': 'random-doc', 'index': index},
-           style={'cursor': 'pointer'})
+            html.Div([
+                # Header with date and title
+                html.Strong(f"{formatted_date} - {metadata['title']}"),
+                html.Br(),
+                # Display metadata
+                html.Div([
+                    html.Span(f"Emotion: {metadata['emotion']}", className="me-3"),
+                    html.Span(f"Topic: {metadata['topic']}", className="me-3"),
+                    html.Span(f"Tags: {metadata['tags']}")
+                ], className="text-muted mb-2"),
+                # Display content with preserved whitespace and newlines
+                html.Pre(metadata['content'], style={
+                    'white-space': 'pre-wrap',
+                    'font-family': 'inherit',
+                    'margin': '8px 0',
+                    'background': 'none',
+                    'border': 'none',
+                    'padding': '0'
+                }),
+                # Store the full content and metadata in a hidden div
+                html.Div(metadata_str, 
+                        id={'type': 'result-content', 'index': index},
+                        style={'display': 'none'})
+            ], className="list-group-item list-group-item-action", 
+               id={'type': 'retrieval-result', 'index': index},
+               style={'cursor': 'pointer'})
+        ])
     ])
 
 # App layout
@@ -406,19 +445,68 @@ def load_journal_entries() -> pd.DataFrame:
         logging.error(f"Error loading journal entries: {e}")
         return pd.DataFrame()
 
-# Callback to update random documents
+# Update the callback to handle retrieval results
 @callback(
-    Output("random-docs-list", "children"),
-    Input("search-button", "n_clicks")
+    [Output("results-panel", "children"),
+     Output("retrieval-results-list", "children")],
+    [Input("user-input", "n_submit"),
+     Input({'type': 'retrieval-result', 'index': dash.ALL}, 'n_clicks')],
+    [State("user-input", "value"),
+     State({'type': 'retrieval-result', 'index': dash.ALL}, 'n_clicks'),
+     State({'type': 'result-content', 'index': dash.ALL}, 'children'),
+     State("retrieval-method", "value")]
 )
-def update_random_docs(n_clicks):
-    """Update the list of random documents."""
-    journal_entries = load_journal_entries()
-    if journal_entries.empty:
-        return []
+def handle_search_and_result_retrieval(n_submit, result_clicks, user_input, result_clicks_state, result_contents, retrieval_method):
+    """
+    Handle both keyword search and result-based retrieval in the RAG evaluation interface.
+    """
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return [None, []]
     
-    random_docs = get_random_documents(journal_entries)
-    return [create_random_doc_item(doc, i) for i, doc in enumerate(random_docs)]
+    # Get the trigger ID
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Determine the query based on the trigger
+    if trigger_id == 'user-input':
+        if not user_input:
+            return [None, []]
+        query = user_input
+        logging.info(f"Performing keyword search for query: {query}")
+        is_doc_query = False
+    else:
+        # Handle result click
+        clicked_index = next((i for i, v in enumerate(result_clicks_state) if v is not None), None)
+        if clicked_index is None or clicked_index >= len(result_contents):
+            return [None, []]
+        query = result_contents[clicked_index]
+        logging.info("Performing result-based retrieval")
+        is_doc_query = True
+    
+    # Perform search and get results
+    search_results = perform_search(query, retrieval_method, is_doc_query)
+    
+    # Extract retrieved documents from debug info
+    retrieved_docs = []
+    if search_results and isinstance(search_results[0], dbc.Card):
+        # The debug info is stored in the card's children
+        card_children = search_results[0].children
+        if len(card_children) > 1:  # Card has header and body
+            card_body = card_children[1]
+            if isinstance(card_body, dbc.CardBody):
+                # Find the debug info in the card body's children
+                for child in card_body.children:
+                    if isinstance(child, dcc.Store) and child.id == 'debug-info':
+                        retrieved_docs = child.data if hasattr(child, 'data') else []
+                        break
+    
+    # Load document contents
+    _, doc_contents = load_document_data(config)
+    
+    # Create retrieval result items with document contents
+    result_items = [create_retrieval_result_item(doc, i, doc_contents) for i, doc in enumerate(retrieved_docs)]
+    
+    return search_results, result_items
 
 def perform_search(query: str, retrieval_method: str, is_doc_query: bool = False) -> List[html.Div]:
     """
@@ -694,45 +782,6 @@ def perform_search(query: str, retrieval_method: str, is_doc_query: bool = False
             'retrieval_method': retrieval_method
         }
         return [create_debug_panel(debug_info)]
-
-# Combined callback to handle both keyword search and document-based retrieval
-@callback(
-    Output("results-panel", "children"),
-    [Input("user-input", "n_submit"),
-     Input({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks')],
-    [State("user-input", "value"),
-     State({'type': 'random-doc', 'index': dash.ALL}, 'n_clicks'),
-     State({'type': 'doc-content', 'index': dash.ALL}, 'children'),
-     State("retrieval-method", "value")]
-)
-def handle_search_and_doc_retrieval(n_submit, random_clicks, user_input, random_clicks_state, doc_contents, retrieval_method):
-    """
-    Handle both keyword search and document-based retrieval in the RAG evaluation interface.
-    """
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return [None]
-    
-    # Get the trigger ID
-    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
-    # Determine the query based on the trigger
-    if trigger_id == 'user-input':
-        if not user_input:
-            return [None]
-        query = user_input
-        logging.info(f"Performing keyword search for query: {query}")
-        is_doc_query = False
-    else:
-        # Handle random document click
-        clicked_index = next((i for i, v in enumerate(random_clicks_state) if v is not None), None)
-        if clicked_index is None or clicked_index >= len(doc_contents):
-            return [None]
-        query = doc_contents[clicked_index]
-        logging.info("Performing document-based retrieval")
-        is_doc_query = True
-    
-    return perform_search(query, retrieval_method, is_doc_query)
 
 # Callback to handle graph node clicks
 @callback(
