@@ -11,6 +11,14 @@ globs: **/*.py
 
 This document provides comprehensive guidelines for using the Plotly library in Python for AI, ML, data science, and other development contexts. It covers various aspects, including code organization, common patterns, performance considerations, security best practices, testing approaches, common pitfalls, and tooling.
 
+### Overarching Rules
+* Minimize change whenever possible
+ * When not sure, ask first for permission
+ * When asked question, just answer without changing anything
+* Don't implement more than what you're asked for
+ * Reuse existing components before creating a new one
+* When referring any rule, mention that you're doing so
+  * e.g. I'm doing this because your rule XYZ says so
 
 ### 1.2. File Naming Conventions
 
@@ -72,33 +80,6 @@ For web applications built with Dash, code splitting can improve performance by 
 *   **Log Errors:** Log error messages to a file or console for debugging purposes.
 *   **Display User-Friendly Error Messages:** Display informative error messages to the user instead of showing raw exceptions.
 *   **Implement Fallback Mechanisms:** Provide fallback mechanisms in case of chart rendering failures, such as displaying a static image or a placeholder message.
-
-## 3. Performance Considerations
-
-### 3.2. Memory Management Considerations
-
-*   **Release Unused Resources:** Ensure that you release any unused resources, such as large datasets or chart objects, to prevent memory leaks.
-*   **Use Generators:** Use generators to process large datasets in chunks instead of loading the entire dataset into memory.
-*   **Avoid Creating Unnecessary Copies:** Avoid creating unnecessary copies of data objects, as this can consume additional memory.
-
-### 3.3. Rendering Optimization
-
-*   **Reduce Chart Complexity:** Simplify your charts by reducing the number of traces, data points, or annotations.
-*   **Use Efficient Data Structures:** Use efficient data structures, such as NumPy arrays or Pandas DataFrames, to store and manipulate data.
-*   **Optimize Callback Logic:** Optimize the logic in your Dash callbacks to reduce the amount of time spent processing data or updating charts.
-
-### 3.4. Bundle Size Optimization Strategies
-
-*   **Use a Virtual Environment:** Create a virtual environment for your project to isolate dependencies and reduce the overall bundle size.
-*   **Remove Unused Dependencies:** Remove any unused dependencies from your project.
-*   **Minify JavaScript and CSS:** Minify JavaScript and CSS files to reduce their size.
-*   **Use Code Splitting:** Split your code into multiple bundles and load only the necessary code for each page or component.
-
-### 3.5. Lazy Loading Strategies
-
-*   **Load Data On-Demand:** Load data only when it is needed, such as when a user interacts with a chart or navigates to a new page.
-*   **Use Asynchronous Loading:** Use asynchronous loading techniques to load data in the background without blocking the main thread.
-*   **Implement Placeholder Content:** Display placeholder content while data is loading to improve the user experience.
 
 ## 5. Testing Approaches
 
