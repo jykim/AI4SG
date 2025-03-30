@@ -188,24 +188,26 @@ class KnowledgeGraph:
             return []
             
         try:
-            # Get k from config or use default, but ensure it's not larger than the number of documents
-            k = min(
-                self.config.get('bm25', {}).get('final_k', top_k),
-                len(self.documents)
-            )
+            # Get k from config or use default
+            k = self.config.get('bm25', {}).get('final_k', top_k)
             
-            # If filtering by type, reindex with only those documents
+            # If filtering by type, retrieve more documents initially
+            # This ensures we have enough results after filtering
             if doc_type != 'all':
-                filtered_docs = [doc for doc in self.documents if doc.get('doc_type') == doc_type]
-                if not filtered_docs:
-                    return []
-                k = min(k, len(filtered_docs))
-                self.bm25_retriever.index_documents(filtered_docs)
-                results, metrics = self.bm25_retriever.get_relevant_entries(query, k=k)
-                # Reindex all documents after search
-                self.bm25_retriever.index_documents(self.documents)
-            else:
-                results, metrics = self.bm25_retriever.get_relevant_entries(query, k=k)
+                k = k * 5  # Retrieve 5x more documents when filtering by type
+            
+            # Ensure k is not larger than the number of documents
+            k = min(k, len(self.documents))
+            
+            # Get results from the main index
+            results, metrics = self.bm25_retriever.get_relevant_entries(query, k=k)
+            
+            # Filter results by document type if specified
+            if doc_type != 'all':
+                results = [doc for doc in results if doc.get('doc_type') == doc_type]
+                # Adjust k to match filtered results
+                k = min(top_k, len(results))
+                results = results[:k]
             
             # Filter out results with zero score
             results = [doc for doc in results if doc.get('match_score', 0) > 0]
@@ -218,9 +220,6 @@ class KnowledgeGraph:
             return results[:top_k]
         except Exception as e:
             logging.error(f"Error during search: {e}")
-            # Make sure to reindex all documents in case of error
-            if doc_type != 'all':
-                self.bm25_retriever.index_documents(self.documents)
             return []
             
     def get_document_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
@@ -402,6 +401,7 @@ def handle_search(n_clicks, n_submit, query, doc_type):
         nodes_y = []  # Y coordinates
         node_labels = []  # Node text labels
         node_colors = []  # Node colors
+        node_shapes = []  # Node shapes
         edge_x = []  # Edge X coordinates
         edge_y = []  # Edge Y coordinates
         edge_weights = []  # Edge weights for line width
@@ -411,6 +411,7 @@ def handle_search(n_clicks, n_submit, query, doc_type):
         nodes_y.append(0)
         node_labels.append(query_node)
         node_colors.append('red')  # Query node in red
+        node_shapes.append('circle')  # Query node as circle
         
         # Add document nodes in a circle around the query node
         import math
@@ -423,8 +424,24 @@ def handle_search(n_clicks, n_submit, query, doc_type):
             # Add document node
             nodes_x.append(x)
             nodes_y.append(y)
-            node_labels.append(doc.get('Title', 'Untitled'))
+            
+            # Format title with line breaks
+            title = doc.get('Title', 'Untitled')
+            words = title.split()
+            if len(words) > 4:
+                # Insert line break after every 4 words
+                title = '<br>'.join([' '.join(words[i:i+4]) for i in range(0, len(words), 4)])
+            
+            # Add date for journal entries
+            doc_type = doc.get('doc_type', 'journal')
+            date = doc.get('Date', '')
+            if doc_type == 'journal' and date:
+                node_labels.append(f"{title}<br>{date}")
+            else:
+                node_labels.append(title)
+                
             node_colors.append('blue')  # Document nodes in blue
+            node_shapes.append('square' if doc_type == 'reading' else 'circle')
             
             # Add edge between query and document
             edge_x.extend([0, x, None])  # None creates a break in the line
@@ -441,7 +458,8 @@ def handle_search(n_clicks, n_submit, query, doc_type):
                     'mode': 'markers+text',
                     'marker': {
                         'size': 20,
-                        'color': node_colors
+                        'color': node_colors,
+                        'symbol': node_shapes
                     },
                     'text': node_labels,
                     'textposition': 'bottom center',
@@ -468,14 +486,16 @@ def handle_search(n_clicks, n_submit, query, doc_type):
                 'xaxis': {
                     'showgrid': False,
                     'zeroline': False,
-                    'showticklabels': False
+                    'showticklabels': False,
+                    'range': [-1.5, 1.5]  # Extend axis range to accommodate labels
                 },
                 'yaxis': {
                     'showgrid': False,
                     'zeroline': False,
-                    'showticklabels': False
+                    'showticklabels': False,
+                    'range': [-1.5, 1.5]  # Extend axis range to accommodate labels
                 },
-                'margin': {'b': 40, 't': 40, 'l': 40, 'r': 40}
+                'margin': {'b': 60, 't': 40, 'l': 60, 'r': 60}  # Increase margins to prevent text cutoff
             }
         }
     else:
