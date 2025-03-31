@@ -15,6 +15,7 @@ This document provides comprehensive guidelines for using the Plotly library in 
 * Minimize change whenever possible
  * When not sure, ask first for permission
  * When asked question, just answer without changing anything
+ * Especially when I say DTA (don't touch anything)
 * Don't implement more than what you're asked for
  * Reuse existing components before creating a new one
 * When referring any rule, mention that you're doing so

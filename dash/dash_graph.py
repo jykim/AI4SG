@@ -42,7 +42,17 @@ class KnowledgeGraph:
         self.config = config
         self.bm25_retriever = BM25Retriever(config)
         self.documents = []
-        self.indexed = False
+        
+        # If BM25Retriever has documents, sync them to our documents list
+        if self.bm25_retriever.documents:
+            self.documents = self.bm25_retriever.documents
+            self.indexed = True
+        else:
+            self.indexed = False
+        
+    def has_index(self) -> bool:
+        """Check if the system has an index."""
+        return bool(self.bm25_retriever.documents)
         
     def load_journal_entries(self) -> pd.DataFrame:
         """Load journal entries from the annotated CSV file."""
@@ -75,7 +85,7 @@ class KnowledgeGraph:
                 row['etc_visual'] if pd.notna(row['etc_visual']) else ''
             ])), axis=1)
             
-            logging.info(f"Loaded {len(df)} journal entries")
+            # logging.info(f"Loaded {len(df)} journal entries")
             return df
         except Exception as e:
             logging.error(f"Error loading journal entries: {e}")
@@ -108,7 +118,7 @@ class KnowledgeGraph:
             df['author'] = df['author'] if 'author' in df.columns else ''
             df['source'] = df['source'] if 'source' in df.columns else ''
             
-            logging.info(f"Loaded {len(df)} reading entries")
+            # logging.info(f"Loaded {len(df)} reading entries")
             return df
         except Exception as e:
             logging.error(f"Error loading reading entries: {e}")
@@ -145,7 +155,7 @@ class KnowledgeGraph:
     def index_documents(self):
         """Index all documents using BM25."""
         if self.indexed:
-            logging.info("Documents already indexed")
+            # logging.info("Documents already indexed")
             return
             
         # Load and process journal entries
@@ -162,7 +172,7 @@ class KnowledgeGraph:
             
         # Index all documents
         if self.documents:
-            logging.info(f"Indexing {len(self.documents)} documents")
+            # logging.info(f"Indexing {len(self.documents)} documents")
             
             # Create document texts that include both content and metadata
             doc_texts = []
@@ -177,13 +187,19 @@ class KnowledgeGraph:
             # Index documents using BM25Retriever
             self.bm25_retriever.index_documents(self.documents)
             self.indexed = True
-            logging.info("Document indexing complete")
+            # logging.info("Document indexing complete")
             
             # Log some sample tokens for debugging
             tokenizer = self.bm25_retriever.tokenizer
             for i, text in enumerate(doc_texts[:2]):  # Show first 2 docs
                 tokens = tokenizer(text)
-                logging.info(f"Doc {i} tokens: {tokens}")
+                # logging.info(f"Doc {i} tokens: {tokens}")
+            
+            # Remove incorrect debug logging statements
+            # logging.info(f"Query: {query}")
+            # logging.info(f"Found {len(results)} results")
+            # for result in results:
+            #     logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
         else:
             logging.warning("No documents to index")
             
@@ -200,8 +216,8 @@ class KnowledgeGraph:
             return []
             
         # Handle no index
-        if not self.indexed:
-            logging.warning("Documents not indexed. Indexing now...")
+        if not self.has_index():
+            logging.warning("No index found. Indexing now...")
             self.index_documents()
             
         # Handle no documents
@@ -240,10 +256,11 @@ class KnowledgeGraph:
                     result['doc_type'] = doc_type
                     
             # Log search results for debugging
-            logging.info(f"Query: {query}")
-            logging.info(f"Found {len(results)} results")
+            # logging.info(f"Query: {query}")
+            # logging.info(f"Found {len(results)} results")
             for result in results:
-                logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
+                # logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
+                pass
                     
             return results[:top_k]
         except Exception as e:
@@ -808,8 +825,5 @@ def handle_search_result_click(n_clicks_list, result_data_list):
     return create_details_content(doc_data)
 
 if __name__ == "__main__":
-    # Initialize the knowledge graph
-    kg.index_documents()
-    
     # Run the app
     app.run_server(debug=True, port=8052) 

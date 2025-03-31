@@ -77,26 +77,8 @@ class KoreanEnglishTokenizer:
         # Get English tokens
         english_tokens = self.tokenize_english(text)
         
-        # Combine Korean nouns with English tokens
-        all_tokens = []
-        
-        # Add Korean nouns
-        for noun in korean_nouns:
-            if len(noun) >= 2:  # Only add nouns with length >= 2
-                all_tokens.append(noun)
-        
-        # Add English tokens
-        all_tokens.extend(english_tokens)
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_tokens = []
-        for token in all_tokens:
-            if token not in seen:
-                seen.add(token)
-                unique_tokens.append(token)
-        
-        return unique_tokens
+        # Simply combine Korean nouns with English tokens
+        return korean_nouns + english_tokens
 
 class BM25Retriever:
     """BM25-based document retriever using BM25S"""
@@ -194,9 +176,13 @@ class BM25Retriever:
         """Index journal entries using BM25S"""
         logging.info(f"Indexing {len(entries)} documents")
         
-        # Clear existing documents
+        # Clear existing documents and metadata
         self.documents = []
         self.metadata = []
+        self.bm25 = BM25(
+            k1=self.bm25_config.get('k1', 1.5),
+            b=self.bm25_config.get('b', 0.75)
+        )
         
         # Process each entry
         for entry in entries:
