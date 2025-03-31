@@ -324,12 +324,193 @@ class KnowledgeGraph:
             
         return recent_docs[:10]  # Limit to 10 most recent entries
 
+class GraphManager:
+    def __init__(self):
+        self.current_graph = []
+        
+    def _create_document_node(self, doc: Dict[str, Any], doc_id: str) -> Dict[str, Any]:
+        """Create a document node with consistent formatting.
+        
+        Args:
+            doc: Document dictionary
+            doc_id: ID for the document node
+            
+        Returns:
+            Dictionary containing document node data
+        """
+        # Get title and format label
+        title = doc.get('Title', 'Untitled')
+        doc_type = doc.get('doc_type', 'journal')
+        date = doc.get('Date', '')
+        
+        # Create label with title and date for journal entries
+        label = f"{title} ({date})" if doc_type == 'journal' and date else title
+        
+        return {
+            'data': {
+                'id': doc_id,
+                'label': label,
+                'type': 'document',
+                'content': doc.get('Content', ''),
+                'doc_type': doc_type,
+                'Date': date,
+                'Title': title,
+                'emotion': doc.get('emotion', ''),
+                'topic': doc.get('topic', ''),
+                'Tags': doc.get('Tags', '')
+            }
+        }
+        
+    def _create_query_node(self, title: str, content: str, node_id: str, 
+                         metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Create a query node with consistent formatting.
+        
+        Args:
+            title: Node title/label
+            content: Node content
+            node_id: ID for the query node
+            metadata: Additional metadata to include
+            
+        Returns:
+            Dictionary containing query node data
+        """
+        node_data = {
+            'id': node_id,
+            'label': title,
+            'type': 'query',
+            'content': content,
+            'doc_type': 'query'
+        }
+        
+        if metadata:
+            node_data.update(metadata)
+            
+        return {'data': node_data}
+        
+    def _create_edge(self, source: str, target: str, weight: float) -> Dict[str, Any]:
+        """Create an edge with consistent formatting.
+        
+        Args:
+            source: Source node ID
+            target: Target node ID
+            weight: Edge weight
+            
+        Returns:
+            Dictionary containing edge data
+        """
+        return {
+            'data': {
+                'source': source,
+                'target': target,
+                'weight': f"{weight:.3f}"
+            }
+        }
+        
+    def create_graph_elements(self, query: str, results: List[Dict[str, Any]], 
+                            query_node_id: str = 'query') -> List[Dict[str, Any]]:
+        """Create graph elements from query and results.
+        
+        Args:
+            query: Search query string
+            results: List of document dictionaries
+            query_node_id: ID for the query node (default: 'query')
+            
+        Returns:
+            List of graph elements (nodes and edges)
+        """
+        elements = []
+        
+        # Add query node
+        elements.append(self._create_query_node(query, query, query_node_id))
+        
+        # Add document nodes and edges
+        for i, doc in enumerate(results):
+            doc_id = f'doc_{i}'
+            
+            # Add document node
+            elements.append(self._create_document_node(doc, doc_id))
+            
+            # Add edge from query to document
+            elements.append(self._create_edge(
+                query_node_id, 
+                doc_id, 
+                doc.get('match_score', 0)
+            ))
+        
+        self.current_graph = elements
+        return elements
+        
+    def expand_graph(self, clicked_node: Dict[str, Any], related_docs: List[Dict[str, Any]], 
+                    current_elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Expand existing graph with new related documents.
+        
+        Args:
+            clicked_node: Dictionary containing clicked node data (with 'data' wrapper)
+            related_docs: List of related document dictionaries
+            current_elements: Current graph elements
+            
+        Returns:
+            List of graph elements (nodes and edges)
+        """
+        # Get existing nodes and edges
+        new_elements = []
+        
+        # Keep existing nodes and edges except clicked node
+        clicked_node_id = clicked_node['data']['id']
+        for elem in current_elements:
+            if elem['data']['id'] != clicked_node_id:
+                new_elements.append(elem)
+        
+        # Convert clicked node to query node
+        new_elements.append(self._create_query_node(
+            clicked_node['data'].get('Title', ''),
+            clicked_node['data'].get('content', ''),
+            clicked_node_id,
+            {
+                'doc_type': clicked_node['data'].get('doc_type', ''),
+                'Date': clicked_node['data'].get('Date', ''),
+                'Title': clicked_node['data'].get('Title', ''),
+                'emotion': clicked_node['data'].get('emotion', ''),
+                'topic': clicked_node['data'].get('topic', ''),
+                'Tags': clicked_node['data'].get('Tags', '')
+            }
+        ))
+        
+        # Get existing document titles to avoid duplicates
+        existing_titles = {
+            elem['data'].get('Title', '').strip()
+            for elem in new_elements
+            if elem['data'].get('type') == 'document'
+        }
+        
+        # Add new document nodes and edges
+        for i, doc in enumerate(related_docs):
+            # Skip if document already exists
+            if doc.get('Title', '').strip() in existing_titles:
+                continue
+                
+            doc_id = f'doc_{len(new_elements)}'
+            
+            # Add document node
+            new_elements.append(self._create_document_node(doc, doc_id))
+            
+            # Add edge from clicked node to document
+            new_elements.append(self._create_edge(
+                clicked_node_id,
+                doc_id,
+                doc.get('match_score', 0)
+            ))
+        
+        self.current_graph = new_elements
+        return new_elements
+
 # Initialize the Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
 # Initialize configuration and knowledge graph
 config = load_config()
 kg = KnowledgeGraph(config)
+graph_manager = GraphManager()
 
 # App layout
 app.layout = dbc.Container([
@@ -601,62 +782,6 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
         )
     ])
 
-def create_graph_elements(query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Create Cytoscape graph elements from query and results."""
-    elements = []
-    
-    # Add query node
-    query_keywords = query.strip().split()
-    query_node = f"Query: {' '.join(query_keywords)}"
-    
-    elements.append({
-        'data': {
-            'id': 'query',
-            'label': query_node,
-            'type': 'query',
-            'content': query
-        }
-    })
-    
-    # Add document nodes and edges
-    for i, doc in enumerate(results):
-        doc_id = f'doc_{i}'
-        
-        # Get title and format label
-        title = doc.get('Title', 'Untitled')
-        doc_type = doc.get('doc_type', 'journal')
-        date = doc.get('Date', '')
-        
-        # Create label with title and date for journal entries
-        label = f"{title} ({date})" if doc_type == 'journal' and date else title
-        
-        # Add document node
-        elements.append({
-            'data': {
-                'id': doc_id,
-                'label': label,
-                'type': 'document',
-                'content': doc.get('Content', ''),
-                'doc_type': doc_type,
-                'Date': date,
-                'Title': title,
-                'emotion': doc.get('emotion', ''),
-                'topic': doc.get('topic', ''),
-                'Tags': doc.get('Tags', '')
-            }
-        })
-        
-        # Add edge from query to document
-        elements.append({
-            'data': {
-                'source': 'query',
-                'target': doc_id,
-                'weight': f"{doc.get('match_score', 0):.3f}"
-            }
-        })
-    
-    return elements
-
 # Callback to load recent entries on startup and when doc type changes
 @callback(
     Output("recent-entries-list", "children"),
@@ -693,10 +818,8 @@ def handle_search(n_clicks, n_submit, query, doc_type):
     # Perform search with document type filter
     results = kg.search(query, doc_type=doc_type)
     
-    # Create graph elements
-    graph_elements = create_graph_elements(query, results)
-    
-    return graph_elements
+    # Create graph elements using GraphManager
+    return graph_manager.create_graph_elements(query, results)
 
 # Callback to handle node clicks
 @callback(
@@ -732,82 +855,8 @@ def handle_node_click(node_data, current_elements):
     # Perform search using combined query
     results = kg.search(query, top_k=5)  # Limit to 5 related documents
     
-    # Get existing document titles in the graph
-    existing_titles = {
-        elem['data'].get('Title', '').strip()
-        for elem in current_elements
-        if elem['data'].get('type') == 'document'
-    }
-    
-    # Filter out documents that are already in the graph
-    results = [
-        doc for doc in results 
-        if doc.get('Title', '').strip() not in existing_titles
-    ]
-    
-    if not results:
-        return current_elements, dash.no_update
-        
-    # Create new elements for related documents
-    new_elements = []
-    
-    # Keep existing nodes and edges
-    for elem in current_elements:
-        if elem['data'].get('id') != node_id:  # Skip the clicked node
-            new_elements.append(elem)
-    
-    # Add the clicked node as a query node (red)
-    new_elements.append({
-        'data': {
-            'id': node_id,
-            'label': title,
-            'type': 'query',
-            'content': content,
-            'doc_type': node['data'].get('doc_type', ''),
-            'Date': node['data'].get('Date', ''),
-            'Title': title,
-            'emotion': node['data'].get('emotion', ''),
-            'topic': node['data'].get('topic', ''),
-            'Tags': node['data'].get('Tags', '')
-        }
-    })
-    
-    # Add related document nodes and edges
-    for i, doc in enumerate(results):
-        doc_id = f'doc_{len(new_elements)}'
-        
-        # Get title and format label
-        title = doc.get('Title', 'Untitled')
-        doc_type = doc.get('doc_type', 'journal')
-        date = doc.get('Date', '')
-        
-        # Create label with title and date for journal entries
-        label = f"{title} ({date})" if doc_type == 'journal' and date else title
-        
-        # Add document node
-        new_elements.append({
-            'data': {
-                'id': doc_id,
-                'label': label,
-                'type': 'document',
-                'content': doc.get('Content', ''),
-                'doc_type': doc_type,
-                'Date': date,
-                'Title': title,
-                'emotion': doc.get('emotion', ''),
-                'topic': doc.get('topic', ''),
-                'Tags': doc.get('Tags', '')
-            }
-        })
-        
-        # Add edge from clicked node to document
-        new_elements.append({
-            'data': {
-                'source': node_id,
-                'target': doc_id,
-                'weight': f"{doc.get('match_score', 0):.3f}"
-            }
-        })
+    # Expand graph using GraphManager
+    new_elements = graph_manager.expand_graph(node, results, current_elements)
     
     # Create details content for the clicked node
     details_content = create_details_content({

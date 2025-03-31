@@ -261,7 +261,7 @@ class BM25Retriever:
             
             # Tokenize query using custom tokenizer
             query_tokens = self.tokenizer(query)
-            logging.info(f"Query tokens: {query_tokens}")
+            # logging.info(f"Query tokens: {query_tokens}")
             
             # Get BM25 scores and results
             results, scores = self.bm25.retrieve([query_tokens], k=k, corpus=self.documents)
@@ -294,9 +294,9 @@ class BM25Retriever:
             timing_metrics['total_time'] = time.time() - start_time
             timing_metrics['num_docs_retrieved'] = len(relevant_entries)
             
-            if relevant_entries:
-                logging.info(f"Retrieved {len(relevant_entries)} documents")
-                logging.info(f"Score range: {min(scores[0])} to {max(scores[0])}")
+            # if relevant_entries:
+            #     logging.info(f"Retrieved {len(relevant_entries)} documents")
+            #     logging.info(f"Score range: {min(scores[0])} to {max(scores[0])}")
             
             return relevant_entries, timing_metrics
             
