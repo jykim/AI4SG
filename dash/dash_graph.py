@@ -36,7 +36,7 @@ def load_config():
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-class KnowledgeGraph:
+class DocumentManager:
     def __init__(self, config: Dict[str, Any]):
         """Initialize the knowledge graph system."""
         self.config = config
@@ -509,7 +509,7 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_
 
 # Initialize configuration and knowledge graph
 config = load_config()
-kg = KnowledgeGraph(config)
+kg = DocumentManager(config)
 graph_manager = GraphManager()
 
 # App layout
