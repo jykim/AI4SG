@@ -283,6 +283,47 @@ class KnowledgeGraph:
             logging.error(f"Error retrieving document: {e}")
             return None
 
+    def get_recent_entries(self, days: int = 7, doc_type: str = 'all') -> List[Dict[str, Any]]:
+        """Get recent entries from both journal and reading entries.
+        
+        Args:
+            days: Number of days to look back
+            doc_type: Type of documents to return ('journal', 'reading', or 'all')
+        """
+        # Load both types of entries
+        journal_df = self.load_journal_entries()
+        reading_df = self.load_reading_entries()
+        
+        # Convert both DataFrames to JSON format
+        journal_docs = self.convert_to_json(journal_df, 'journal')
+        reading_docs = self.convert_to_json(reading_df, 'reading')
+        
+        # Combine all documents based on type filter
+        if doc_type == 'all':
+            all_docs = journal_docs + reading_docs
+        elif doc_type == 'journal':
+            all_docs = journal_docs
+        elif doc_type == 'reading':
+            all_docs = reading_docs
+        else:
+            all_docs = []
+        
+        # Sort by date
+        all_docs.sort(key=lambda x: x.get('Date', ''), reverse=True)
+        
+        # Get entries from the last 7 days
+        recent_docs = []
+        today = datetime.now().date()
+        
+        for doc in all_docs:
+            doc_date = datetime.strptime(doc.get('Date', ''), '%Y-%m-%d').date()
+            if (today - doc_date).days <= days:
+                recent_docs.append(doc)
+            else:
+                break
+            
+        return recent_docs[:10]  # Limit to 10 most recent entries
+
 # Initialize the Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
@@ -325,10 +366,10 @@ app.layout = dbc.Container([
                         dbc.Button("Search", id="search-button", color="primary")
                     ]),
                     
-                    # Search Results
+                    # Recent Entries Placeholder
                     html.Div([
-                        html.H5("Search Results", className="mt-4 mb-3"),
-                        html.Div(id="search-results-list", className="list-group")
+                        html.H5("Recent Entries", className="mt-4 mb-3"),
+                        html.Div(id="recent-entries-list", className="list-group")
                     ])
                 ])
             ], className="h-100")
@@ -616,30 +657,46 @@ def create_graph_elements(query: str, results: List[Dict[str, Any]]) -> List[Dic
     
     return elements
 
+# Callback to load recent entries on startup and when doc type changes
+@callback(
+    Output("recent-entries-list", "children"),
+    [Input("search-button", "n_clicks"),
+     Input("search-input", "n_submit"),
+     Input("doc-type-filter", "value")],
+    prevent_initial_call=False  # Allow initial call to load entries on startup
+)
+def load_recent_entries(n_clicks, n_submit, doc_type):
+    """Load recent entries when the app starts or when document type changes."""
+    # Get recent entries with document type filter
+    recent_docs = kg.get_recent_entries(doc_type=doc_type)
+    
+    # Create list of entry components
+    entries = []
+    for i, doc in enumerate(recent_docs):
+        entries.append(create_search_result_item(doc, i))
+        
+    return entries
+
 # Callback to handle search
 @callback(
-    [Output("search-results-list", "children"),
-     Output("knowledge-graph", "elements")],
+    Output("knowledge-graph", "elements"),
     [Input("search-button", "n_clicks"),
      Input("search-input", "n_submit")],
     [State("search-input", "value"),
      State("doc-type-filter", "value")]
 )
 def handle_search(n_clicks, n_submit, query, doc_type):
-    """Handle search queries and update both the results list and graph visualization."""
+    """Handle search queries and update the graph visualization."""
     if not query:
-        return [], []
+        return []
         
     # Perform search with document type filter
     results = kg.search(query, doc_type=doc_type)
     
-    # Create search result items for the list
-    result_items = [create_search_result_item(doc, i) for i, doc in enumerate(results)]
-    
     # Create graph elements
     graph_elements = create_graph_elements(query, results)
     
-    return result_items, graph_elements
+    return graph_elements
 
 # Callback to handle node clicks
 @callback(
@@ -797,33 +854,105 @@ def handle_graph_hover(node_data, current_elements):
         'Tags': node['data'].get('Tags', '')
     })
 
-# Callback to handle search result title clicks
+# Callback to handle recent entry clicks
 @callback(
-    Output("details-content", "children", allow_duplicate=True),
+    Output("knowledge-graph", "elements", allow_duplicate=True),
     [Input({'type': 'result-title', 'index': dash.ALL}, 'n_clicks')],
     [State({'type': 'result-data', 'index': dash.ALL}, 'children')],
     prevent_initial_call=True
 )
-def handle_search_result_click(n_clicks_list, result_data_list):
-    """Handle clicks on search result titles to show document details."""
-    if not n_clicks_list or not result_data_list:
-        return dash.no_update
-        
-    # Find which button was clicked
+def handle_recent_entry_click(n_clicks_list, result_data_list):
+    """Handle clicks on recent entries to update the graph."""
+    # Check if this is a real click (not initial load)
     ctx = dash.callback_context
     if not ctx.triggered:
         return dash.no_update
         
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    button_id = json.loads(button_id)
+    # Get the trigger info
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    trigger_value = ctx.triggered[0]['value']
+    
+    # If this is the initial load or no clicks, return no update
+    if trigger_id == 'dash.no_update' or not trigger_value:
+        return dash.no_update
+        
+    # Find which button was clicked
+    button_id = json.loads(trigger_id)
     index = button_id['index']
     
     # Get the document data for the clicked result
     doc_data = json.loads(result_data_list[index])
     
-    # Create and return the details content
-    return create_details_content(doc_data)
+    # Create query from document content
+    title = doc_data.get('Title', '')
+    content = doc_data.get('Content', '')
+    query = f"{title} {content}"
+    
+    if not query.strip():
+        return dash.no_update
+        
+    # Perform search using document content
+    results = kg.search(query, top_k=5)  # Limit to 5 related documents
+    
+    # Create graph elements with the clicked document as query node
+    elements = []
+    
+    # Add the clicked document as query node
+    elements.append({
+        'data': {
+            'id': 'query',
+            'label': title,
+            'type': 'query',
+            'content': content,
+            'doc_type': doc_data.get('doc_type', ''),
+            'Date': doc_data.get('Date', ''),
+            'Title': title,
+            'emotion': doc_data.get('emotion', ''),
+            'topic': doc_data.get('topic', ''),
+            'Tags': doc_data.get('Tags', '')
+        }
+    })
+    
+    # Add related document nodes and edges
+    for i, doc in enumerate(results):
+        doc_id = f'doc_{i}'
+        
+        # Get title and format label
+        doc_title = doc.get('Title', 'Untitled')
+        doc_type = doc.get('doc_type', 'journal')
+        date = doc.get('Date', '')
+        
+        # Create label with title and date for journal entries
+        label = f"{doc_title} ({date})" if doc_type == 'journal' and date else doc_title
+        
+        # Add document node
+        elements.append({
+            'data': {
+                'id': doc_id,
+                'label': label,
+                'type': 'document',
+                'content': doc.get('Content', ''),
+                'doc_type': doc_type,
+                'Date': date,
+                'Title': doc_title,
+                'emotion': doc.get('emotion', ''),
+                'topic': doc.get('topic', ''),
+                'Tags': doc.get('Tags', '')
+            }
+        })
+        
+        # Add edge from query to document
+        elements.append({
+            'data': {
+                'source': 'query',
+                'target': doc_id,
+                'weight': f"{doc.get('match_score', 0):.3f}"
+            }
+        })
+    
+    return elements
 
 if __name__ == "__main__":
     # Run the app
+    app.run_server(debug=True, port=8052) 
     app.run_server(debug=True, port=8052) 
