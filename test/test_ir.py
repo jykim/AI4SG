@@ -3,8 +3,12 @@
 Test script for evaluating BM25Retriever implementation
 """
 
-import os
+import sys
 from pathlib import Path
+# Add parent directory to Python path for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+import os
 import logging
 import time
 from typing import List, Dict, Any

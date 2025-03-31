@@ -3,9 +3,14 @@
 Test script for evaluating IR index with sample queries
 """
 
-import os
+import sys
 from pathlib import Path
+# Add parent directory to Python path for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+import os
 import logging
+import time
 import yaml
 import pandas as pd
 from ir_utils import BM25Retriever

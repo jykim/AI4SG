@@ -853,7 +853,10 @@ def handle_node_click(node_data, current_elements):
         return current_elements, dash.no_update
         
     # Perform search using combined query
-    results = kg.search(query, top_k=5)  # Limit to 5 related documents
+    results = kg.search(query, top_k=10)  # Increased from 5 to 10 to account for deduplication
+    
+    # Filter out the clicked document from results
+    results = [doc for doc in results if doc.get('Title', '').strip() != title.strip()]
     
     # Expand graph using GraphManager
     new_elements = graph_manager.expand_graph(node, results, current_elements)
