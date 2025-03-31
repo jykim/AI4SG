@@ -19,6 +19,84 @@ from bm25s import BM25, tokenize
 import re
 import Stemmer  # Optional: for stemming
 import json
+from konlpy.tag import Kkma
+
+class KoreanEnglishTokenizer:
+    """Custom tokenizer that handles both Korean and English text"""
+    
+    def __init__(self, kkma=None, stemmer=None):
+        """Initialize the tokenizer with Kkma and stemmer"""
+        self.kkma = kkma or Kkma()
+        self.stemmer = stemmer
+        self.korean_pattern = re.compile('[가-힣]+')
+        
+    def preprocess_text(self, text: str) -> str:
+        """Preprocess text before tokenization"""
+        # Convert to string if not already
+        text = str(text)
+        
+        # Convert to lowercase for English text
+        text = text.lower()
+        
+        # Remove special characters but keep Korean characters
+        text = re.sub(r'[^\w\s가-힣]', ' ', text)
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        return text
+    
+    def tokenize_english(self, text: str) -> List[str]:
+        """Tokenize English text"""
+        # Split on whitespace and filter
+        tokens = []
+        for token in text.split():
+            # Skip if token is Korean
+            if self.korean_pattern.search(token):
+                continue
+            # Skip if token is too short
+            if len(token) < 2:
+                continue
+            # Apply stemming if available
+            if self.stemmer:
+                token = self.stemmer.stemWord(token)
+            tokens.append(token)
+        return tokens
+    
+    def __call__(self, text: str) -> List[str]:
+        """Tokenize text, extracting Korean nouns and English tokens"""
+        if not text or not text.strip():
+            return []
+            
+        # Preprocess text
+        text = self.preprocess_text(text)
+        
+        # Get Korean nouns
+        korean_nouns = self.kkma.nouns(text)
+        
+        # Get English tokens
+        english_tokens = self.tokenize_english(text)
+        
+        # Combine Korean nouns with English tokens
+        all_tokens = []
+        
+        # Add Korean nouns
+        for noun in korean_nouns:
+            if len(noun) >= 2:  # Only add nouns with length >= 2
+                all_tokens.append(noun)
+        
+        # Add English tokens
+        all_tokens.extend(english_tokens)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_tokens = []
+        for token in all_tokens:
+            if token not in seen:
+                seen.add(token)
+                unique_tokens.append(token)
+        
+        return unique_tokens
 
 class BM25Retriever:
     """BM25-based document retriever using BM25S"""
@@ -56,6 +134,9 @@ class BM25Retriever:
                 self.stemmer = Stemmer.Stemmer(stemming_config.get('language', 'english'))
             except Exception as e:
                 logging.warning(f"Failed to initialize stemmer: {e}")
+        
+        # Initialize custom tokenizer
+        self.tokenizer = KoreanEnglishTokenizer(stemmer=self.stemmer)
         
         self.documents = []  # Document texts for BM25
         self.metadata = []   # Document metadata (includes doc_type)
@@ -123,12 +204,8 @@ class BM25Retriever:
             self.documents.append(text)
             self.metadata.append(metadata)
         
-        # Tokenize documents using bm25s tokenize function
-        tokenized_docs = tokenize(
-            self.documents,
-            stopwords=self.bm25_config.get('tokenizer', {}).get('stopwords', 'en'),
-            stemmer=self.stemmer
-        )
+        # Tokenize documents using custom tokenizer
+        tokenized_docs = [self.tokenizer(doc) for doc in self.documents]
         
         # Index documents
         self.bm25.index(tokenized_docs)
@@ -196,15 +273,12 @@ class BM25Retriever:
             timing_metrics = {}
             start_time = time.time()
             
-            # Tokenize query using bm25s tokenize function
-            query_tokens = tokenize(
-                [query],
-                stopwords=self.bm25_config.get('tokenizer', {}).get('stopwords', 'en'),
-                stemmer=self.stemmer
-            )
+            # Tokenize query using custom tokenizer
+            query_tokens = self.tokenizer(query)
+            logging.info(f"Query tokens: {query_tokens}")
             
             # Get BM25 scores and results
-            results, scores = self.bm25.retrieve(query_tokens, k=k, corpus=self.documents)
+            results, scores = self.bm25.retrieve([query_tokens], k=k, corpus=self.documents)
             
             # Prepare results
             relevant_entries = []
@@ -257,12 +331,8 @@ class BM25Retriever:
                 new_documents.append(text)
                 new_metadata.append(metadata)
             
-            # Tokenize new documents using bm25s tokenize function
-            tokenized_docs = tokenize(
-                new_documents,
-                stopwords=self.bm25_config.get('tokenizer', {}).get('stopwords', 'en'),
-                stemmer=self.stemmer
-            )
+            # Tokenize new documents using custom tokenizer
+            tokenized_docs = [self.tokenizer(doc) for doc in new_documents]
             
             # Add new documents to index
             self.bm25.index(tokenized_docs)

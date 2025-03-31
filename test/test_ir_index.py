@@ -73,12 +73,42 @@ def print_results(entries, query):
         print(f"Tags: {entry['Tags']}")
         print(f"Content: {entry['Content'][:200]}...")  # Show first 200 chars
 
+def test_tokenization():
+    """Test tokenization directly"""
+    from bm25s import tokenize
+    from ir_utils import KoreanEnglishTokenizer
+    import Stemmer
+    
+    # Initialize tokenizer
+    stemmer = Stemmer.Stemmer('english')
+    tokenizer = KoreanEnglishTokenizer(stemmer=stemmer)
+    
+    # Test queries
+    test_queries = [
+        "golf",
+        "ai",
+        "practice"
+    ]
+    
+    print("\n=== Testing Tokenization ===")
+    for query in test_queries:
+        print(f"\nQuery: {query}")
+        # Test bm25s tokenize directly
+        bm25s_tokens = tokenize([query], stemmer=stemmer)[0]
+        print(f"BM25S tokens: {bm25s_tokens}")
+        # Test our custom tokenizer
+        custom_tokens = tokenizer(query)
+        print(f"Custom tokens: {custom_tokens}")
+
 def main():
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    
+    # Test tokenization first
+    test_tokenization()
     
     # Load configuration
     config = load_config()

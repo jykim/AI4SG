@@ -163,9 +163,27 @@ class KnowledgeGraph:
         # Index all documents
         if self.documents:
             logging.info(f"Indexing {len(self.documents)} documents")
+            
+            # Create document texts that include both content and metadata
+            doc_texts = []
+            for doc in self.documents:
+                text = f"{doc['Title']} {doc['Content']} {doc['Tags']}"
+                if 'emotion' in doc:
+                    text += f" {doc['emotion']}"
+                if 'topic' in doc:
+                    text += f" {doc['topic']}"
+                doc_texts.append(text)
+            
+            # Index documents using BM25Retriever
             self.bm25_retriever.index_documents(self.documents)
             self.indexed = True
             logging.info("Document indexing complete")
+            
+            # Log some sample tokens for debugging
+            tokenizer = self.bm25_retriever.tokenizer
+            for i, text in enumerate(doc_texts[:2]):  # Show first 2 docs
+                tokens = tokenizer(text)
+                logging.info(f"Doc {i} tokens: {tokens}")
         else:
             logging.warning("No documents to index")
             
@@ -220,6 +238,12 @@ class KnowledgeGraph:
             for result in results:
                 if 'doc_type' not in result and doc_type != 'all':
                     result['doc_type'] = doc_type
+                    
+            # Log search results for debugging
+            logging.info(f"Query: {query}")
+            logging.info(f"Found {len(results)} results")
+            for result in results:
+                logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
                     
             return results[:top_k]
         except Exception as e:
