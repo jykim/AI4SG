@@ -9,7 +9,7 @@ globs: **/*.py
 ---
 # Plotly Best Practices and Coding Standards
 
-This document provides comprehensive guidelines for using the Plotly library in Python for AI, ML, data science, and other development contexts. It covers various aspects, including code organization, common patterns, performance considerations, security best practices, testing approaches, common pitfalls, and tooling.
+This document provides comprehensive guidelines for using the Plotly library in Python for AI, ML, data science, and other development contexts. 
 
 ### Overarching Rules
 * Minimize change whenever possible

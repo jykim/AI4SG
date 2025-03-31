@@ -349,6 +349,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
     4. Get file size
     5. Extract URL from frontmatter or markdown content
     6. Extract source from folder name if not in frontmatter
+    7. Get first 2000 bytes of content
     
     Args:
         file_path: Path to the text file
@@ -363,6 +364,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
         - source_color: Color code for the source type
         - size: File size in human readable format
         - url: URL of the reading material
+        - content: First 2000 bytes of content
     """
     try:
         path = pathlib.Path(file_path)
@@ -384,7 +386,8 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
             'source': '',
             'source_color': '',
             'size': size,
-            'url': ''
+            'url': '',
+            'content': ''
         }
         
         # Read file content to extract YAML frontmatter and URL
@@ -460,6 +463,10 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
         # Set source color based on the source type
         metadata['source_color'] = get_source_color(metadata['source'])
         
+        # Get entire content after frontmatter
+        content_without_frontmatter = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, flags=re.DOTALL)
+        metadata['content'] = content_without_frontmatter.strip()
+        
         if debug:
             print(f"DEBUG - Extracted metadata: {metadata}")
             
@@ -474,7 +481,8 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
             'source': '',
             'source_color': '#95A5A6',  # Default gray color
             'size': '',
-            'url': ''
+            'url': '',
+            'content': ''
         }
 
 def index_txt_files(root_dir: str, debug: bool = False, max_files: Optional[int] = None) -> List[Dict]:
@@ -521,7 +529,8 @@ def index_txt_files(root_dir: str, debug: bool = False, max_files: Optional[int]
             'source': metadata['source'],
             'source_color': metadata['source_color'],
             'size': metadata['size'],
-            'url': metadata['url']
+            'url': metadata['url'],
+            'content': metadata['content']
         })
     
     return entries_info
@@ -542,7 +551,7 @@ def save_to_csv(entries_info: List[Dict], output_file: str = None):
     if output_file is None:
         output_file = config.output_dir / 'reading_entries.csv'
     
-    fieldnames = ['date', 'title', 'author', 'source', 'source_color', 'size', 'url', 'full_path']
+    fieldnames = ['date', 'title', 'author', 'source', 'source_color', 'size', 'url', 'content', 'full_path']
     
     with open(output_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -557,6 +566,7 @@ def save_to_csv(entries_info: List[Dict], output_file: str = None):
                 'source_color': str(entry.get('source_color', '#95A5A6')).strip(),
                 'size': str(entry.get('size', '')).strip().replace('\n', ' '),
                 'url': str(entry.get('url', '')).strip().replace('\n', ' '),
+                'content': str(entry.get('content', '')).strip(),
                 'full_path': str(entry.get('full_path', '')).strip().replace('\n', ' ')
             }
             writer.writerow(clean_entry)
@@ -591,6 +601,12 @@ def save_to_markdown(entries_info: List[Dict], output_file: str = None):
             if entry['url']:
                 f.write(f"**URL:** {entry['url']}\n")
             f.write("\n")
+            
+            # Write content preview
+            if entry['content']:
+                f.write("**Content:**\n")
+                f.write(entry['content'])
+                f.write("\n\n")
             
             # Read and include full content
             try:

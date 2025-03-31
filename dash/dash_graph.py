@@ -460,7 +460,25 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
 
 def create_details_content(doc: Dict[str, Any]) -> html.Div:
     """Create the details content for a selected document."""
-    # Format metadata
+    # Get document type
+    doc_type = doc.get('doc_type', '')
+    
+    # For reading documents, only show the content since it already includes title and metadata
+    if doc_type == 'reading':
+        return html.Div([
+            dcc.Markdown(
+                doc.get('Content', ''),
+                className="mt-3 mb-0",
+                style={
+                    'fontFamily': 'inherit',
+                    'fontSize': '1rem',
+                    'lineHeight': '1.5',
+                    'margin': '0'
+                }
+            )
+        ])
+    
+    # For other document types, show title and metadata
     metadata = []
     if doc.get('Date'):
         metadata.append(f"Date: {doc.get('Date')}")
@@ -488,12 +506,11 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
             html.Small(meta, className="text-muted me-3") for meta in metadata
         ], className="mb-4"),
         
-        # Content with preserved newlines
-        html.Pre(
+        # Content with markdown formatting
+        dcc.Markdown(
             doc.get('Content', ''),
             className="mt-3 mb-0",
             style={
-                'whiteSpace': 'pre-wrap',
                 'fontFamily': 'inherit',
                 'fontSize': '1rem',
                 'lineHeight': '1.5',
@@ -738,6 +755,33 @@ def handle_graph_hover(node_data, current_elements):
         'topic': node['data'].get('topic', ''),
         'Tags': node['data'].get('Tags', '')
     })
+
+# Callback to handle search result title clicks
+@callback(
+    Output("details-content", "children", allow_duplicate=True),
+    [Input({'type': 'result-title', 'index': dash.ALL}, 'n_clicks')],
+    [State({'type': 'result-data', 'index': dash.ALL}, 'children')],
+    prevent_initial_call=True
+)
+def handle_search_result_click(n_clicks_list, result_data_list):
+    """Handle clicks on search result titles to show document details."""
+    if not n_clicks_list or not result_data_list:
+        return dash.no_update
+        
+    # Find which button was clicked
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update
+        
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    button_id = json.loads(button_id)
+    index = button_id['index']
+    
+    # Get the document data for the clicked result
+    doc_data = json.loads(result_data_list[index])
+    
+    # Create and return the details content
+    return create_details_content(doc_data)
 
 if __name__ == "__main__":
     # Initialize the knowledge graph
