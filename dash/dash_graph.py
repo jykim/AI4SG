@@ -908,17 +908,18 @@ def handle_graph_hover(node_data, current_elements):
 
 # Callback to handle recent entry clicks
 @callback(
-    Output("knowledge-graph", "elements", allow_duplicate=True),
+    [Output("knowledge-graph", "elements", allow_duplicate=True),
+     Output("details-content", "children", allow_duplicate=True)],
     [Input({'type': 'result-title', 'index': dash.ALL}, 'n_clicks')],
     [State({'type': 'result-data', 'index': dash.ALL}, 'children')],
     prevent_initial_call=True
 )
 def handle_recent_entry_click(n_clicks_list, result_data_list):
-    """Handle clicks on recent entries to update the graph."""
+    """Handle clicks on recent entries to update the graph and details."""
     # Check if this is a real click (not initial load)
     ctx = dash.callback_context
     if not ctx.triggered:
-        return dash.no_update
+        return dash.no_update, dash.no_update
         
     # Get the trigger info
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
@@ -926,7 +927,7 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
     
     # If this is the initial load or no clicks, return no update
     if trigger_id == 'dash.no_update' or not trigger_value:
-        return dash.no_update
+        return dash.no_update, dash.no_update
         
     # Find which button was clicked
     button_id = json.loads(trigger_id)
@@ -941,7 +942,7 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
     query = f"{title} {content}"
     
     if not query.strip():
-        return dash.no_update
+        return dash.no_update, dash.no_update
         
     # Perform search using document content
     results = kg.search(query, top_k=5)  # Limit to 5 related documents
@@ -1002,7 +1003,10 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
             }
         })
     
-    return elements
+    # Create details content for the clicked document
+    details_content = create_details_content(doc_data)
+    
+    return elements, details_content
 
 if __name__ == "__main__":
     # Run the app
