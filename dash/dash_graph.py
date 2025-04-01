@@ -8,6 +8,7 @@ including document indexing and retrieval capabilities.
 
 import sys
 from pathlib import Path
+import argparse
 # Add parent directory to Python path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -37,18 +38,26 @@ def load_config():
         return yaml.safe_load(f)
 
 class DocumentManager:
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize the knowledge graph system."""
+    def __init__(self, config: Dict[str, Any], force_reindex: bool = False):
+        """Initialize the knowledge graph system.
+        
+        Args:
+            config: Configuration dictionary
+            force_reindex: Whether to force re-indexing of documents
+        """
         self.config = config
         self.bm25_retriever = BM25Retriever(config)
         self.documents = []
         
-        # If BM25Retriever has documents, sync them to our documents list
-        if self.bm25_retriever.documents:
+        # If force_reindex is True or no documents exist, index them
+        if force_reindex or not self.bm25_retriever.documents:
+            self.indexed = False
+            logging.info("Initializing document indexing...")
+            self.index_documents()
+        else:
             self.documents = self.bm25_retriever.documents
             self.indexed = True
-        else:
-            self.indexed = False
+            logging.info("Using existing document index")
         
     def has_index(self) -> bool:
         """Check if the system has an index."""
@@ -507,9 +516,14 @@ class GraphManager:
 # Initialize the Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Run the knowledge graph visualization dashboard')
+parser.add_argument('--reindex', action='store_true', help='Force re-indexing of documents at startup')
+args = parser.parse_args()
+
 # Initialize configuration and knowledge graph
 config = load_config()
-kg = DocumentManager(config)
+kg = DocumentManager(config, force_reindex=args.reindex)
 graph_manager = GraphManager()
 
 # App layout
@@ -1010,5 +1024,4 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
 
 if __name__ == "__main__":
     # Run the app
-    app.run_server(debug=True, port=8052) 
     app.run_server(debug=True, port=8052) 

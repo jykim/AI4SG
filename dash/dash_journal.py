@@ -398,6 +398,9 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
     color_str = str(color).strip()
     if color_str.lower() == 'blank' or not color_str.startswith('#'):
         return '#FFFFFF'
+    # Extract first color if multiple colors are present
+    if '&' in color_str:
+        color_str = color_str.split('&')[0].strip()
     return color_str
 
 def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
