@@ -23,6 +23,8 @@ from typing import Dict, List, Any, Optional
 import json
 from datetime import datetime
 
+# Remove placeholder imports for extraction functions
+
 from ir_utils import BM25Retriever
 
 # Register Cytoscape component
@@ -48,12 +50,18 @@ class DocumentManager:
         self.config = config
         self.bm25_retriever = BM25Retriever(config)
         self.documents = []
-        
-        # If force_reindex is True or no documents exist, index them
-        if force_reindex or not self.bm25_retriever.documents:
-            self.indexed = False
-            logging.info("Initializing document indexing...")
-            self.index_documents()
+        self.indexed = False # Initialize indexed state
+
+        if force_reindex:
+            logging.info("Force reindex requested. Running extraction and indexing...")
+            self.index_documents(force_run=True)
+            logging.info("Re-indexing complete. Exiting.")
+            sys.exit(0) # Exit after re-indexing
+
+        # If not forcing reindex, check if index exists and load/create as needed
+        elif not self.bm25_retriever.documents:
+            logging.info("No existing index found. Initializing document indexing...")
+            self.index_documents() # Run indexing without extraction
         else:
             self.documents = self.bm25_retriever.documents
             self.indexed = True
@@ -161,12 +169,24 @@ class DocumentManager:
             json_docs.append(doc)
         return json_docs
         
-    def index_documents(self):
-        """Index all documents using BM25."""
-        if self.indexed:
-            # logging.info("Documents already indexed")
-            return
-            
+    def index_documents(self, force_run: bool = False):
+        """Index all documents using BM25. Optionally run extraction first."""
+        # Reset state for indexing
+        self.indexed = False
+        self.documents = []
+
+        if force_run:
+            logging.info("Running data extraction routines...")
+            try:
+                # Extraction logic removed as requested
+                # run_journal_extraction()
+                # run_reading_extraction()
+                logging.info("Extraction routines (placeholders removed) completed.")
+            except Exception as e:
+                logging.error(f"Error during (removed) data extraction: {e}")
+                # Decide if you want to proceed with indexing even if extraction fails
+                # For now, we'll proceed
+
         # Load and process journal entries
         journal_df = self.load_journal_entries()
         if not journal_df.empty:
@@ -212,13 +232,14 @@ class DocumentManager:
         else:
             logging.warning("No documents to index")
             
-    def search(self, query: str, top_k: int = 10, doc_type: str = 'all') -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 10, doc_type: str = 'all', exclude_doc_id: str = None) -> List[Dict[str, Any]]:
         """Search for relevant documents.
         
         Args:
             query: The search query
             top_k: Maximum number of results to return
             doc_type: Type of documents to search ('journal', 'reading', or 'all')
+            exclude_doc_id: Optional document ID to exclude from results
         """
         # Handle empty query
         if not query.strip():
@@ -247,7 +268,7 @@ class DocumentManager:
             k = min(k, len(self.documents))
             
             # Get results from the main index
-            results, metrics = self.bm25_retriever.get_relevant_entries(query, k=k)
+            results, metrics = self.bm25_retriever.get_relevant_entries(query, k=k, exclude_doc_id=exclude_doc_id)
             
             # Filter results by document type if specified
             if doc_type != 'all':
@@ -858,19 +879,18 @@ def handle_node_click(node_data, current_elements):
     if not node:
         return current_elements, dash.no_update
         
-    # Get the node's content
+    # Get the node's content and metadata
     title = node['data'].get('Title', '')
     content = node['data'].get('content', '')
+    date = node['data'].get('Date', '')
+    doc_id = f"{date}_{title}"  # Create document ID
     query = f"{title} {content}"
     
     if not query.strip():
         return current_elements, dash.no_update
         
-    # Perform search using combined query
-    results = kg.search(query, top_k=10)  # Increased from 5 to 10 to account for deduplication
-    
-    # Filter out the clicked document from results
-    results = [doc for doc in results if doc.get('Title', '').strip() != title.strip()]
+    # Perform search using combined query, excluding the clicked document
+    results = kg.search(query, top_k=10, exclude_doc_id=doc_id)  # Pass doc_id to exclude
     
     # Expand graph using GraphManager
     new_elements = graph_manager.expand_graph(node, results, current_elements)
@@ -950,16 +970,18 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
     # Get the document data for the clicked result
     doc_data = json.loads(result_data_list[index])
     
-    # Create query from document content
+    # Create query from document content and get document ID
     title = doc_data.get('Title', '')
     content = doc_data.get('Content', '')
+    date = doc_data.get('Date', '')
+    doc_id = f"{date}_{title}"  # Create document ID
     query = f"{title} {content}"
     
     if not query.strip():
         return dash.no_update, dash.no_update
         
-    # Perform search using document content
-    results = kg.search(query, top_k=5)  # Limit to 5 related documents
+    # Perform search using document content, excluding the clicked document
+    results = kg.search(query, top_k=5, exclude_doc_id=doc_id)  # Pass doc_id to exclude
     
     # Create graph elements with the clicked document as query node
     elements = []

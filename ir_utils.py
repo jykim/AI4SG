@@ -244,9 +244,14 @@ class BM25Retriever:
         except Exception as e:
             logging.error(f"Failed to load index: {e}")
     
-    def get_relevant_entries(self, query: str, k: int = None) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+    def get_relevant_entries(self, query: str, k: int = None, exclude_doc_id: str = None) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
         """
         Retrieve relevant journal entries for a given query using BM25 ranking.
+        
+        Args:
+            query: The search query
+            k: Maximum number of results to return
+            exclude_doc_id: Optional document ID to exclude from results
         """
         if k is None:
             k = self.config['final_k']
@@ -276,6 +281,13 @@ class BM25Retriever:
                 idx = self.documents.index(doc)
                 metadata = self.metadata[idx]  # Get corresponding metadata
                 
+                # Create document ID
+                doc_id = f"{metadata['date']}_{metadata['title']}"
+                
+                # Skip if this is the document to exclude
+                if exclude_doc_id and doc_id == exclude_doc_id:
+                    continue
+                
                 entry = {
                     'Date': metadata['date'],
                     'Time': metadata['time'],
@@ -285,7 +297,7 @@ class BM25Retriever:
                     'topic': metadata['topic'],
                     'Tags': metadata['tags'],
                     'match_score': float(score),
-                    'doc_id': f"{metadata['date']}_{metadata['title']}",
+                    'doc_id': doc_id,
                     'match_type': 'bm25',
                     'doc_type': metadata['doc_type']  # Get doc_type from metadata
                 }
