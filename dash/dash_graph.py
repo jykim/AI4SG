@@ -19,7 +19,7 @@ import dash_cytoscape as cyto
 import pandas as pd
 import yaml
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
 
@@ -313,12 +313,17 @@ class DocumentManager:
             logging.error(f"Error retrieving document: {e}")
             return None
 
-    def get_recent_entries(self, days: int = 7, doc_type: str = 'all') -> List[Dict[str, Any]]:
+    def get_recent_entries(self, days: int = 7, doc_type: str = 'all', page: int = 0, entries_per_page: int = 10) -> Tuple[List[Dict[str, Any]], bool]:
         """Get recent entries from both journal and reading entries.
         
         Args:
             days: Number of days to look back
             doc_type: Type of documents to return ('journal', 'reading', or 'all')
+            page: Page number (0-based)
+            entries_per_page: Number of entries per page
+            
+        Returns:
+            Tuple of (entries for current page, has_next_page)
         """
         # Load both types of entries
         journal_df = self.load_journal_entries()
@@ -352,7 +357,12 @@ class DocumentManager:
             else:
                 break
             
-        return recent_docs[:10]  # Limit to 10 most recent entries
+        # Calculate pagination
+        start_idx = page * entries_per_page
+        end_idx = start_idx + entries_per_page
+        has_next_page = end_idx < len(recent_docs)
+        
+        return recent_docs[start_idx:end_idx], has_next_page
 
 class GraphManager:
     def __init__(self):
@@ -547,6 +557,10 @@ config = load_config()
 kg = DocumentManager(config, force_reindex=args.reindex)
 graph_manager = GraphManager()
 
+# Global state for pagination
+current_page = 0
+entries_per_page = 10
+
 # App layout
 app.layout = dbc.Container([
     dbc.Row([
@@ -585,7 +599,10 @@ app.layout = dbc.Container([
                     # Recent Entries Placeholder
                     html.Div([
                         html.H5("Recent Entries", className="mt-4 mb-3"),
-                        html.Div(id="recent-entries-list", className="list-group")
+                        html.Div(id="recent-entries-list", className="list-group"),
+                        html.Div([
+                            dbc.Button("Next Page", id="next-page-button", color="primary", className="mt-3", disabled=True),
+                        ], className="d-flex justify-content-center")
                     ])
                 ])
             ], className="h-100")
@@ -819,16 +836,49 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
 
 # Callback to load recent entries on startup and when doc type changes
 @callback(
-    Output("recent-entries-list", "children"),
+    [Output("recent-entries-list", "children"),
+     Output("next-page-button", "disabled")],
     [Input("search-button", "n_clicks"),
      Input("search-input", "n_submit"),
-     Input("doc-type-filter", "value")],
+     Input("doc-type-filter", "value"),
+     Input("next-page-button", "n_clicks")],
     prevent_initial_call=False  # Allow initial call to load entries on startup
 )
-def load_recent_entries(n_clicks, n_submit, doc_type):
+def load_recent_entries(n_clicks, n_submit, doc_type, next_page_clicks):
     """Load recent entries when the app starts or when document type changes."""
+    global current_page
+    
+    # Reset page when document type changes
+    ctx = dash.callback_context
+    if ctx.triggered and ctx.triggered[0]['prop_id'] == 'doc-type-filter.value':
+        current_page = 0
+    
     # Get recent entries with document type filter
-    recent_docs = kg.get_recent_entries(doc_type=doc_type)
+    recent_docs, has_next_page = kg.get_recent_entries(doc_type=doc_type, page=current_page)
+    
+    # Create list of entry components
+    entries = []
+    for i, doc in enumerate(recent_docs):
+        entries.append(create_search_result_item(doc, i))
+        
+    return entries, not has_next_page
+
+# Callback to handle next page button clicks
+@callback(
+    Output("recent-entries-list", "children", allow_duplicate=True),
+    [Input("next-page-button", "n_clicks")],
+    [State("doc-type-filter", "value")],
+    prevent_initial_call=True
+)
+def handle_next_page(n_clicks, doc_type):
+    """Handle next page button clicks."""
+    global current_page
+    
+    if n_clicks is None:
+        return dash.no_update
+        
+    current_page += 1
+    recent_docs, has_next_page = kg.get_recent_entries(doc_type=doc_type, page=current_page)
     
     # Create list of entry components
     entries = []
