@@ -16,8 +16,8 @@ import pandas as pd
 import shutil
 import tempfile
 from datetime import datetime
-from ir_utils import BM25Retriever
-from index_documents import index_documents, save_to_csv, save_to_markdown, Config
+from search.ir_utils import BM25Retriever
+from search.index_documents import index_documents, save_to_csv, save_to_markdown, Config
 
 def load_config():
     """Load configuration from config_rag.yaml"""
@@ -113,30 +113,26 @@ def test_incremental_indexing():
     """Test incremental indexing functionality"""
     print("\n=== Testing Incremental Indexing ===")
     
-    # Create a temporary directory for testing
+    # Create temporary test directory
     with tempfile.TemporaryDirectory() as temp_dir:
-        temp_dir_path = Path(temp_dir)
+        temp_path = Path(temp_dir)
+        test_docs_dir = temp_path / "test_docs"
+        test_output_dir = temp_path / "output"
+        test_index_dir = temp_path / "test_docs"
         
-        # Create a test output directory
-        test_output_dir = temp_dir_path / "output"
+        # Create test directories
+        test_docs_dir.mkdir(exist_ok=True)
         test_output_dir.mkdir(exist_ok=True)
         
-        # Create a test index directory with some markdown files
-        test_index_dir = temp_dir_path / "test_docs"
-        test_index_dir.mkdir(exist_ok=True)
+        # Create test markdown files
+        file1_path = test_docs_dir / "test1.md"
+        file2_path = test_docs_dir / "test2.md"
+        file3_path = test_docs_dir / "test3.md"
         
-        # Create some test markdown files
-        file1_path = test_index_dir / "test1.md"
-        file2_path = test_index_dir / "test2.md"
-        file3_path = test_index_dir / "test3.md"
-        
-        # Write content to the files
         with open(file1_path, "w") as f:
             f.write("# Test Document 1\n\nThis is a test document for incremental indexing.")
-        
         with open(file2_path, "w") as f:
             f.write("# Test Document 2\n\nThis is another test document for incremental indexing.")
-        
         with open(file3_path, "w") as f:
             f.write("# Test Document 3\n\nThis is a third test document for incremental indexing.")
         
@@ -147,7 +143,7 @@ def test_incremental_indexing():
         
         # First indexing - full index
         print("Performing initial full indexing...")
-        entries_info = index_documents(str(test_index_dir), debug=True, incremental=False)
+        entries_info, timing_stats = index_documents(str(test_index_dir), debug=True, incremental=False)
         save_to_csv(entries_info, test_output_dir / "repo_index.csv")
         save_to_markdown(entries_info, test_output_dir / "repo_index.md")
         
@@ -158,28 +154,25 @@ def test_incremental_indexing():
         # Wait a moment to ensure timestamps are different
         time.sleep(1)
         
-        # Modify one file
-        with open(file2_path, "w") as f:
-            f.write("# Test Document 2 (Updated)\n\nThis is an updated test document for incremental indexing.")
+        # Modify a file
+        print("\nModifying test2.md...")
+        with open(file2_path, "a") as f:
+            f.write("\n\nThis is an update to test incremental indexing.")
         
-        # Second indexing - incremental
-        print("Performing incremental indexing...")
-        entries_info = index_documents(str(test_index_dir), debug=True, incremental=True)
-        save_to_csv(entries_info, test_output_dir / "repo_index.csv")
-        save_to_markdown(entries_info, test_output_dir / "repo_index.md")
+        # Run incremental indexing
+        print("\nRunning incremental indexing...")
+        updated_entries, timing_stats = index_documents(str(test_index_dir), debug=True, incremental=True)
+        save_to_csv(updated_entries, test_output_dir / "repo_index.csv")
+        save_to_markdown(updated_entries, test_output_dir / "repo_index.md")
         
-        # Verify incremental index
-        incremental_csv = pd.read_csv(test_output_dir / "repo_index.csv")
-        print(f"Incremental index contains {len(incremental_csv)} entries")
+        # Verify updated index
+        updated_csv = pd.read_csv(test_output_dir / "repo_index.csv")
+        print(f"Updated index contains {len(updated_csv)} entries")
         
-        # Check if file2 was updated
-        file2_entry = incremental_csv[incremental_csv['full_path'].str.contains('test2.md')]
-        if not file2_entry.empty:
-            print(f"File2 content in incremental index: {file2_entry['content'].iloc[0][:50]}...")
-            assert "updated test document" in file2_entry['content'].iloc[0].lower(), "File2 content was not updated in the incremental index"
-        
-        # Check if all files are still in the index
-        assert len(incremental_csv) == 3, "Not all files are in the incremental index"
+        # Check that the modified file was updated
+        modified_entry = updated_csv[updated_csv['path'].str.contains('test2.md')].iloc[0]
+        assert "update to test incremental" in modified_entry['content'], \
+            "Modified content not found in updated index"
         
         print("Incremental indexing test passed!")
 

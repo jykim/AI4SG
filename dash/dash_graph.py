@@ -23,9 +23,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
 
-# Remove placeholder imports for extraction functions
-
-from ir_utils import BM25Retriever
+# Import from search directory
+from search.ir_utils import BM25Retriever
 
 # Register Cytoscape component
 cyto.load_extra_layouts()
@@ -62,13 +61,17 @@ class DocumentManager:
                     raise FileNotFoundError(f"index_documents.py not found at {index_script}")
                 
                 import subprocess
-                result = subprocess.run([sys.executable, str(index_script), '--force', '--build-bm25'], 
+                result = subprocess.run([sys.executable, str(index_script), '--force', '--build-bm25', '--debug'], 
                                      capture_output=True, text=True)
                 
                 if result.returncode != 0:
                     logging.error(f"Error running index_documents.py: {result.stderr}")
                     raise RuntimeError("Failed to run index_documents.py")
                     
+                # Log timing information from the output
+                if result.stdout:
+                    logging.info(result.stdout)
+                
                 logging.info("index_documents.py completed successfully")
                 
                 # After reindexing, load the new index

@@ -20,8 +20,7 @@ import sys
 import time
 
 # Import BM25Retriever for indexing
-sys.path.append(str(Path(__file__).parent))
-from ir_utils import BM25Retriever
+from .ir_utils import BM25Retriever
 
 class Config:
     """Configuration class to manage application settings"""
@@ -463,26 +462,21 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
     
     return entries_info, timing_stats
 
-def save_to_csv(entries_info: List[Dict], output_file: str = None):
+def save_to_csv(entries_info: List[Dict], output_file: Path) -> None:
     """
-    Save the indexed documents to a CSV file.
+    Save indexed documents to a CSV file.
     
     Process:
-    1. Read existing CSV file if it exists
-    2. Clean and normalize all text fields
-    3. Remove newlines and extra whitespace
-    4. Write to CSV with proper quoting
+    1. Read existing entries from CSV file if it exists
+    2. Process new/updated entries
+    3. Merge existing and updated entries
+    4. Write all entries to CSV file
     
     Args:
-        entries_info: List of dictionaries containing document metadata
-        output_file: Name of the output CSV file (default: from config)
+        entries_info: List of dictionaries containing file information and metadata
+        output_file: Path to the output CSV file
     """
-    if output_file is None:
-        output_file = config.output_dir / 'repo_index.csv'
-    
-    fieldnames = ['date', 'title', 'content', 'properties', 'tags', 'path', 'size', 'internal_links', 'external_links', 'full_path', 'mtime']
-    
-    # First read existing entries if file exists
+    # Read existing entries from CSV file if it exists
     existing_entries = {}
     if output_file.exists():
         try:
@@ -519,9 +513,12 @@ def save_to_csv(entries_info: List[Dict], output_file: str = None):
     logging.info(f"- {len(existing_entries)} existing entries")
     logging.info(f"- {len(updated_entries)} new/updated entries")
     
-    # Write all entries to CSV
-    with open(output_file, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+    # Write all entries to CSV file
+    with open(output_file, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'date', 'title', 'content', 'properties', 'tags', 'path', 'size',
+            'internal_links', 'external_links', 'full_path', 'mtime'
+        ])
         writer.writeheader()
         for entry in final_entries.values():
             writer.writerow(entry)
@@ -721,7 +718,7 @@ def main():
     
     # Save results in both formats
     save_start_time = time.time()
-    save_to_csv(entries_info)
+    save_to_csv(entries_info, config.output_dir / 'repo_index.csv')
     save_to_markdown(entries_info)
     save_time = time.time() - save_start_time
     
