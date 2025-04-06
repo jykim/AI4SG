@@ -51,17 +51,37 @@ class DocumentManager:
         self.bm25_retriever = BM25Retriever(config)
         self.documents = []
         self.indexed = False # Initialize indexed state
+        self.doc_types = set()  # Track available document types
 
         if force_reindex:
-            logging.info("Force reindex requested. Running extraction and indexing...")
-            self.index_documents(force_run=True)
-            logging.info("Re-indexing complete. Exiting.")
-            sys.exit(0) # Exit after re-indexing
+            logging.info("Force reindex requested. Running index_documents.py...")
+            try:
+                # Run index_documents.py script
+                index_script = Path(__file__).parent.parent / "index_documents.py"
+                if not index_script.exists():
+                    raise FileNotFoundError(f"index_documents.py not found at {index_script}")
+                
+                import subprocess
+                result = subprocess.run([sys.executable, str(index_script), '--force', '--build-bm25'], 
+                                     capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    logging.error(f"Error running index_documents.py: {result.stderr}")
+                    raise RuntimeError("Failed to run index_documents.py")
+                    
+                logging.info("index_documents.py completed successfully")
+                
+                # After reindexing, load the new index
+                self.load_index()
+                logging.info("Re-indexing complete. Continuing with dashboard.")
+            except Exception as e:
+                logging.error(f"Error during re-indexing: {e}")
+                raise
 
-        # If not forcing reindex, check if index exists and load/create as needed
+        # If not forcing reindex, check if index exists and load as needed
         elif not self.bm25_retriever.documents:
-            logging.info("No existing index found. Initializing document indexing...")
-            self.index_documents() # Run indexing without extraction
+            logging.info("No existing index found. Please run index_documents.py first.")
+            self.load_index() # Try to load index from disk
         else:
             self.documents = self.bm25_retriever.documents
             self.indexed = True
@@ -71,55 +91,19 @@ class DocumentManager:
         """Check if the system has an index."""
         return bool(self.bm25_retriever.documents)
         
-    def load_journal_entries(self) -> pd.DataFrame:
-        """Load journal entries from the annotated CSV file."""
+    def load_indexed_documents(self) -> pd.DataFrame:
+        """Load documents from the indexed CSV file."""
         try:
-            output_dir = Path(self.config['output_dir'])
-            annotated_file = output_dir / 'journal_entries_annotated.csv'
-            if not annotated_file.exists():
-                logging.warning(f"No annotated journal entries found in {output_dir}")
+            # Get path relative to dash directory
+            output_dir = Path(__file__).parent.parent / 'output'
+            indexed_file = output_dir / 'repo_index.csv'
+            if not indexed_file.exists():
+                logging.warning(f"No indexed documents found in {output_dir}")
                 return pd.DataFrame()
             
-            logging.info(f"Loading journal entries from {annotated_file}")
+            logging.info(f"Loading indexed documents from {indexed_file}")
             
-            df = pd.read_csv(annotated_file)
-            if df.empty:
-                logging.warning("Loaded CSV file is empty")
-                return pd.DataFrame()
-                
-            # Clean up and parse dates
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df = df.dropna(subset=['Date'])
-            
-            # Clean up fields
-            df['emotion'] = df['emotion'].fillna('')
-            df['emotion'] = df['emotion'].apply(lambda x: '' if pd.isna(x) or str(x).strip() == '' else x)
-            df['Title'] = df['Title'].apply(lambda x: str(x).strip('"*') if pd.notna(x) else x)
-            
-            # Create Tags column
-            df['Tags'] = df.apply(lambda row: ' '.join(filter(None, [
-                row['topic_visual'] if pd.notna(row['topic_visual']) else '',
-                row['etc_visual'] if pd.notna(row['etc_visual']) else ''
-            ])), axis=1)
-            
-            # logging.info(f"Loaded {len(df)} journal entries")
-            return df
-        except Exception as e:
-            logging.error(f"Error loading journal entries: {e}")
-            return pd.DataFrame()
-            
-    def load_reading_entries(self) -> pd.DataFrame:
-        """Load reading entries from the annotated CSV file."""
-        try:
-            output_dir = Path(self.config['output_dir'])
-            reading_file = output_dir / 'reading_entries.csv'
-            if not reading_file.exists():
-                logging.warning(f"No reading entries found in {output_dir}")
-                return pd.DataFrame()
-            
-            logging.info(f"Loading reading entries from {reading_file}")
-            
-            df = pd.read_csv(reading_file)
+            df = pd.read_csv(indexed_file)
             if df.empty:
                 logging.warning("Loaded CSV file is empty")
                 return pd.DataFrame()
@@ -128,109 +112,74 @@ class DocumentManager:
             df['Date'] = pd.to_datetime(df['date'], errors='coerce')
             df = df.dropna(subset=['Date'])
             
+            # Extract document type from the top folder of the path
+            df['doc_type'] = df['path'].apply(lambda x: x.split('/')[0] if '/' in x else 'other')
+            
+            # Add to doc_types set
+            self.doc_types.update(df['doc_type'].unique())
+            
             # Map column names to match our schema
             df['Title'] = df['title'].apply(lambda x: str(x).strip('"*') if pd.notna(x) else x)
-            df['Content'] = df['content'] if 'content' in df.columns else ''  # Map content field
-            df['Tags'] = df['tags'] if 'tags' in df.columns else ''
-            df['author'] = df['author'] if 'author' in df.columns else ''
-            df['source'] = df['source'] if 'source' in df.columns else ''
+            df['Content'] = df['content'] if 'content' in df.columns else ''
+            df['Tags'] = df['tags'].apply(lambda x: json.loads(x) if pd.notna(x) else [])
+            df['Tags'] = df['Tags'].apply(lambda x: ' '.join(x) if isinstance(x, list) else '')
             
-            # logging.info(f"Loaded {len(df)} reading entries")
+            logging.info(f"Loaded {len(df)} indexed documents")
             return df
         except Exception as e:
-            logging.error(f"Error loading reading entries: {e}")
+            logging.error(f"Error loading indexed documents: {e}")
             return pd.DataFrame()
             
-    def convert_to_json(self, df: pd.DataFrame, doc_type: str) -> List[Dict[str, Any]]:
+    def convert_to_json(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Convert DataFrame rows to JSON blobs."""
         json_docs = []
         for _, row in df.iterrows():
-            # Common fields for both types
+            # Common fields for all types
             doc = {
-                'doc_type': doc_type,
+                'doc_type': row['doc_type'],
                 'Date': row['Date'].strftime('%Y-%m-%d') if pd.notna(row['Date']) else '',
                 'Title': str(row['Title']) if pd.notna(row['Title']) else '',
                 'Content': str(row['Content']) if pd.notna(row['Content']) else '',
                 'Tags': str(row['Tags']) if pd.notna(row['Tags']) else '',
+                'path': str(row['path']) if pd.notna(row['path']) else '',
+                'size': str(row['size']) if pd.notna(row['size']) else '',
             }
             
-            # Add type-specific fields
-            if doc_type == 'journal':
-                doc.update({
-                    'emotion': str(row['emotion']) if pd.notna(row['emotion']) else '',
-                    'topic': str(row['topic']) if pd.notna(row['topic']) else '',
-                })
-            elif doc_type == 'reading':
-                doc.update({
-                    'author': str(row['author']) if pd.notna(row['author']) else '',
-                    'source': str(row['source']) if pd.notna(row['source']) else '',
-                })
+            # Add properties if available
+            if 'properties' in row and pd.notna(row['properties']):
+                try:
+                    properties = json.loads(row['properties'])
+                    doc.update(properties)
+                except:
+                    pass
                 
             json_docs.append(doc)
         return json_docs
         
-    def index_documents(self, force_run: bool = False):
-        """Index all documents using BM25. Optionally run extraction first."""
-        # Reset state for indexing
-        self.indexed = False
-        self.documents = []
-
-        if force_run:
-            logging.info("Running data extraction routines...")
-            try:
-                # Extraction logic removed as requested
-                # run_journal_extraction()
-                # run_reading_extraction()
-                logging.info("Extraction routines (placeholders removed) completed.")
-            except Exception as e:
-                logging.error(f"Error during (removed) data extraction: {e}")
-                # Decide if you want to proceed with indexing even if extraction fails
-                # For now, we'll proceed
-
-        # Load and process journal entries
-        journal_df = self.load_journal_entries()
-        if not journal_df.empty:
-            journal_docs = self.convert_to_json(journal_df, 'journal')
-            self.documents.extend(journal_docs)
+    def load_index(self):
+        """Load the BM25 index from disk."""
+        try:
+            # Get path relative to dash directory
+            output_dir = Path(__file__).parent.parent / 'output'
+            bm25_index_dir = output_dir / 'bm25_index'
             
-        # Load and process reading entries
-        reading_df = self.load_reading_entries()
-        if not reading_df.empty:
-            reading_docs = self.convert_to_json(reading_df, 'reading')
-            self.documents.extend(reading_docs)
-            
-        # Index all documents
-        if self.documents:
-            # logging.info(f"Indexing {len(self.documents)} documents")
-            
-            # Create document texts that include both content and metadata
-            doc_texts = []
-            for doc in self.documents:
-                text = f"{doc['Title']} {doc['Content']} {doc['Tags']}"
-                if 'emotion' in doc:
-                    text += f" {doc['emotion']}"
-                if 'topic' in doc:
-                    text += f" {doc['topic']}"
-                doc_texts.append(text)
-            
-            # Index documents using BM25Retriever
-            self.bm25_retriever.index_documents(self.documents)
+            if not bm25_index_dir.exists():
+                logging.warning(f"No BM25 index found at {bm25_index_dir}")
+                return
+                
+            # Load the index
+            self.bm25_retriever._load_index(str(bm25_index_dir))
+            self.documents = self.bm25_retriever.metadata
             self.indexed = True
-            # logging.info("Document indexing complete")
+            logging.info(f"Loaded BM25 index from {bm25_index_dir}")
             
-            # Log some sample tokens for debugging
-            tokenizer = self.bm25_retriever.tokenizer
-            for i, text in enumerate(doc_texts[:2]):  # Show first 2 docs
-                tokens = tokenizer(text)
-                # logging.info(f"Doc {i} tokens: {tokens}")
-            
-            # Remove incorrect debug logging statements
-            # logging.info(f"Query: {query}")
-            # logging.info(f"Found {len(results)} results")
-            # for result in results:
-            #     logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
-        else:
-            logging.warning("No documents to index")
+            # Update doc_types
+            for doc in self.documents:
+                if 'doc_type' in doc:
+                    self.doc_types.add(doc['doc_type'])
+                    
+        except Exception as e:
+            logging.error(f"Error loading BM25 index: {e}")
             
     def search(self, query: str, top_k: int = 10, doc_type: str = 'all', exclude_doc_id: str = None) -> List[Dict[str, Any]]:
         """Search for relevant documents.
@@ -247,8 +196,8 @@ class DocumentManager:
             
         # Handle no index
         if not self.has_index():
-            logging.warning("No index found. Indexing now...")
-            self.index_documents()
+            logging.warning("No index found. Please run index_documents.py first.")
+            return []
             
         # Handle no documents
         if not self.documents:
@@ -285,18 +234,11 @@ class DocumentManager:
                 if 'doc_type' not in result and doc_type != 'all':
                     result['doc_type'] = doc_type
                     
-            # Log search results for debugging
-            # logging.info(f"Query: {query}")
-            # logging.info(f"Found {len(results)} results")
-            for result in results:
-                # logging.info(f"Score: {result['match_score']:.3f}, Title: {result['Title']}")
-                pass
-                    
             return results[:top_k]
         except Exception as e:
             logging.error(f"Error during search: {e}")
             return []
-            
+
     def get_document_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
         """Get a document by its ID."""
         if not self.indexed:
@@ -325,23 +267,15 @@ class DocumentManager:
         Returns:
             Tuple of (entries for current page, has_next_page)
         """
-        # Load both types of entries
-        journal_df = self.load_journal_entries()
-        reading_df = self.load_reading_entries()
+        # Load indexed documents
+        indexed_df = self.load_indexed_documents()
         
-        # Convert both DataFrames to JSON format
-        journal_docs = self.convert_to_json(journal_df, 'journal')
-        reading_docs = self.convert_to_json(reading_df, 'reading')
+        # Convert DataFrame to JSON format
+        all_docs = self.convert_to_json(indexed_df)
         
-        # Combine all documents based on type filter
-        if doc_type == 'all':
-            all_docs = journal_docs + reading_docs
-        elif doc_type == 'journal':
-            all_docs = journal_docs
-        elif doc_type == 'reading':
-            all_docs = reading_docs
-        else:
-            all_docs = []
+        # Filter by document type if specified
+        if doc_type != 'all':
+            all_docs = [doc for doc in all_docs if doc.get('doc_type') == doc_type]
         
         # Sort by date
         all_docs.sort(key=lambda x: x.get('Date', ''), reverse=True)
@@ -351,11 +285,15 @@ class DocumentManager:
         today = datetime.now().date()
         
         for doc in all_docs:
-            doc_date = datetime.strptime(doc.get('Date', ''), '%Y-%m-%d').date()
-            if (today - doc_date).days <= days:
-                recent_docs.append(doc)
-            else:
-                break
+            try:
+                doc_date = datetime.strptime(doc.get('Date', ''), '%Y-%m-%d').date()
+                if (today - doc_date).days <= days:
+                    recent_docs.append(doc)
+                else:
+                    break
+            except (ValueError, TypeError):
+                # Skip documents with invalid dates
+                continue
             
         # Calculate pagination
         start_idx = page * entries_per_page
@@ -572,15 +510,12 @@ app.layout = dbc.Container([
                     # Document Type Filter
                     html.Div([
                         html.H5("Document Type", className="mb-3"),
-                        dbc.RadioItems(
+                        dcc.Dropdown(
                             id="doc-type-filter",
                             options=[
-                                {"label": "All Documents", "value": "all"},
-                                {"label": "Journal Entries", "value": "journal"},
-                                {"label": "Reading Entries", "value": "reading"}
+                                {"label": "All Documents", "value": "all"}
                             ],
                             value="all",
-                            inline=True,
                             className="mb-3"
                         ),
                     ]),
@@ -728,6 +663,8 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
     
     # Get document type
     doc_type = doc.get('doc_type', 'NO_TYPE_FOUND')
+    # Format document type for display
+    doc_type_display = doc_type.replace('_', ' ').capitalize()
     
     return dbc.Card([
         dbc.CardBody([
@@ -751,7 +688,7 @@ def create_search_result_item(doc: Dict[str, Any], index: int) -> html.Div:
                 # Left column: Date and Type
                 html.Div([
                     html.Small(f"Date: {date_str}", className="text-muted d-block"),
-                    html.Small(f"Type: {doc_type}", className="text-muted d-block"),
+                    html.Small(f"Type: {doc_type_display}", className="text-muted d-block"),
                 ], className="float-start"),
                 
                 # Right column: Score and Tags
@@ -777,6 +714,8 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
     """Create the details content for a selected document."""
     # Get document type
     doc_type = doc.get('doc_type', '')
+    # Format document type for display
+    doc_type_display = doc_type.replace('_', ' ').capitalize()
     
     # For reading documents, only show the content since it already includes title and metadata
     if doc_type == 'reading':
@@ -798,7 +737,7 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
     if doc.get('Date'):
         metadata.append(f"Date: {doc.get('Date')}")
     if doc.get('doc_type'):
-        metadata.append(f"Type: {doc.get('doc_type')}")
+        metadata.append(f"Type: {doc_type_display}")
     if doc.get('emotion'):
         metadata.append(f"Emotion: {doc.get('emotion')}")
     if doc.get('topic'):
@@ -809,6 +748,10 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
         metadata.append(f"Author: {doc.get('author')}")
     if doc.get('source'):
         metadata.append(f"Source: {doc.get('source')}")
+    if doc.get('path'):
+        metadata.append(f"Path: {doc.get('path')}")
+    if doc.get('size'):
+        metadata.append(f"Size: {doc.get('size')} KB")
     if doc.get('match_score'):
         metadata.append(f"Match Score: {doc.get('match_score'):.3f}")
     
@@ -833,6 +776,29 @@ def create_details_content(doc: Dict[str, Any]) -> html.Div:
             }
         )
     ])
+
+# Callback to update document type dropdown options
+@callback(
+    Output("doc-type-filter", "options"),
+    [Input("search-button", "n_clicks"),
+     Input("search-input", "n_submit")],
+    prevent_initial_call=False
+)
+def update_doc_type_options(n_clicks, n_submit):
+    """Update document type dropdown options based on available document types."""
+    # Get available document types
+    doc_types = sorted(list(kg.doc_types))
+    
+    # Create options list
+    options = [{"label": "All Documents", "value": "all"}]
+    
+    # Add document type options
+    for doc_type in doc_types:
+        # Capitalize first letter and replace underscores with spaces
+        label = doc_type.replace('_', ' ').capitalize()
+        options.append({"label": label, "value": doc_type})
+    
+    return options
 
 # Callback to load recent entries on startup and when doc type changes
 @callback(

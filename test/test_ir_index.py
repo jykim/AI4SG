@@ -13,7 +13,11 @@ import logging
 import time
 import yaml
 import pandas as pd
+import shutil
+import tempfile
+from datetime import datetime
 from ir_utils import BM25Retriever
+from index_documents import index_documents, save_to_csv, save_to_markdown, Config
 
 def load_config():
     """Load configuration from config_rag.yaml"""
@@ -105,6 +109,80 @@ def test_tokenization():
         custom_tokens = tokenizer(query)
         print(f"Custom tokens: {custom_tokens}")
 
+def test_incremental_indexing():
+    """Test incremental indexing functionality"""
+    print("\n=== Testing Incremental Indexing ===")
+    
+    # Create a temporary directory for testing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        
+        # Create a test output directory
+        test_output_dir = temp_dir_path / "output"
+        test_output_dir.mkdir(exist_ok=True)
+        
+        # Create a test index directory with some markdown files
+        test_index_dir = temp_dir_path / "test_docs"
+        test_index_dir.mkdir(exist_ok=True)
+        
+        # Create some test markdown files
+        file1_path = test_index_dir / "test1.md"
+        file2_path = test_index_dir / "test2.md"
+        file3_path = test_index_dir / "test3.md"
+        
+        # Write content to the files
+        with open(file1_path, "w") as f:
+            f.write("# Test Document 1\n\nThis is a test document for incremental indexing.")
+        
+        with open(file2_path, "w") as f:
+            f.write("# Test Document 2\n\nThis is another test document for incremental indexing.")
+        
+        with open(file3_path, "w") as f:
+            f.write("# Test Document 3\n\nThis is a third test document for incremental indexing.")
+        
+        # Create a temporary config
+        config = Config()
+        config.output_dir = test_output_dir
+        config.index_dir = test_index_dir
+        
+        # First indexing - full index
+        print("Performing initial full indexing...")
+        entries_info = index_documents(str(test_index_dir), debug=True, incremental=False)
+        save_to_csv(entries_info, test_output_dir / "repo_index.csv")
+        save_to_markdown(entries_info, test_output_dir / "repo_index.md")
+        
+        # Verify initial index
+        initial_csv = pd.read_csv(test_output_dir / "repo_index.csv")
+        print(f"Initial index contains {len(initial_csv)} entries")
+        
+        # Wait a moment to ensure timestamps are different
+        time.sleep(1)
+        
+        # Modify one file
+        with open(file2_path, "w") as f:
+            f.write("# Test Document 2 (Updated)\n\nThis is an updated test document for incremental indexing.")
+        
+        # Second indexing - incremental
+        print("Performing incremental indexing...")
+        entries_info = index_documents(str(test_index_dir), debug=True, incremental=True)
+        save_to_csv(entries_info, test_output_dir / "repo_index.csv")
+        save_to_markdown(entries_info, test_output_dir / "repo_index.md")
+        
+        # Verify incremental index
+        incremental_csv = pd.read_csv(test_output_dir / "repo_index.csv")
+        print(f"Incremental index contains {len(incremental_csv)} entries")
+        
+        # Check if file2 was updated
+        file2_entry = incremental_csv[incremental_csv['full_path'].str.contains('test2.md')]
+        if not file2_entry.empty:
+            print(f"File2 content in incremental index: {file2_entry['content'].iloc[0][:50]}...")
+            assert "updated test document" in file2_entry['content'].iloc[0].lower(), "File2 content was not updated in the incremental index"
+        
+        # Check if all files are still in the index
+        assert len(incremental_csv) == 3, "Not all files are in the incremental index"
+        
+        print("Incremental indexing test passed!")
+
 def main():
     # Configure logging
     logging.basicConfig(
@@ -114,6 +192,9 @@ def main():
     
     # Test tokenization first
     test_tokenization()
+    
+    # Test incremental indexing
+    test_incremental_indexing()
     
     # Load configuration
     config = load_config()
