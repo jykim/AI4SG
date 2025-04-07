@@ -236,6 +236,10 @@ def extract_title_from_filename(filename: str) -> str:
     Returns:
         Title string without date prefix
     """
+    # Handle None or empty filename
+    if not filename:
+        return "Unknown Title"
+        
     # Remove extension
     filename = pathlib.Path(filename).stem
     
@@ -246,7 +250,7 @@ def extract_title_from_filename(filename: str) -> str:
     
     # If no date pattern found, remove any date-like prefix
     title = re.sub(r'^\d{4}-\d{2}-\d{2}\s*', '', filename)
-    return title.strip()
+    return title.strip() or "Unknown Title"  # Return "Unknown Title" if title is empty after stripping
 
 def extract_title(file_path: str, first_lines: List[str], debug: bool = False) -> str:
     """
@@ -391,8 +395,13 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
         }
         
         # Read file content to extract YAML frontmatter and URL
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            if debug:
+                print(f"Warning: Could not read file {file_path}: {str(e)}")
+            return metadata
             
         # Extract YAML frontmatter if present
         frontmatter_match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
@@ -407,9 +416,9 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
                     # Handle author field (remove "By " prefix if present)
                     if 'author' in frontmatter_data:
                         author = frontmatter_data['author']
-                        if author.startswith('By '):
+                        if author and isinstance(author, str) and author.startswith('By '):
                             author = author[3:].strip()
-                        metadata['author'] = author
+                        metadata['author'] = author or ''
                     
                     # Handle source field (combine multiple sources if present)
                     sources = []
@@ -423,7 +432,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, str]:
                     
                     # Extract URL from frontmatter if present
                     if 'url' in frontmatter_data:
-                        metadata['url'] = frontmatter_data['url']
+                        metadata['url'] = frontmatter_data['url'] or ''
                     
                     # Use frontmatter date if available
                     if 'date' in frontmatter_data:

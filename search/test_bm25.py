@@ -16,7 +16,7 @@ import yaml
 import bm25s
 import Stemmer
 from konlpy.tag import Kkma
-from ir_utils import BM25Retriever, KoreanEnglishTokenizer
+from bm25_utils import BM25Retriever, KoreanEnglishTokenizer
 
 def create_test_corpus() -> List[Dict[str, Any]]:
     """Create a test corpus with journal entries"""

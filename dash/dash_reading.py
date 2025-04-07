@@ -313,7 +313,7 @@ def filter_metadata(content):
     # Remove metadata block if present
     filtered_content = re.sub(pattern, '', content, flags=re.DOTALL)
     
-    return filtered_content.strip()
+    return filtered_content.strip() or ""
 
 def format_markdown(content):
     """
@@ -341,7 +341,7 @@ def format_markdown(content):
     
     for line in lines:
         # Handle headers
-        if line.startswith('#'):
+        if line and line.startswith('#'):
             level = len(line) - len(line.lstrip('#'))
             text = line.lstrip('#').strip()
             if level <= 3:  # Only handle h1-h3
@@ -349,18 +349,18 @@ def format_markdown(content):
             continue
         
         # Handle links
-        if '[' in line and '](' in line:
+        if line and '[' in line and '](' in line:
             # Keep markdown links as is
             formatted_lines.append(line)
             continue
         
         # Regular text
-        if line.strip():
+        if line and line.strip():
             formatted_lines.append(line)
         else:
             formatted_lines.append('')
     
-    return '\n'.join(formatted_lines)
+    return '\n'.join(formatted_lines) or ""
 
 # Create the layout
 app.layout = html.Div([

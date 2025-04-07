@@ -24,27 +24,26 @@ import json
 from datetime import datetime
 
 # Import from search directory
-from search.ir_utils import BM25Retriever
+from search.bm25_utils import BM25Retriever
 
 # Register Cytoscape component
 cyto.load_extra_layouts()
 
 # Initialize configuration
 def load_config():
-    """Load configuration from config_rag.yaml"""
-    config_path = Path(__file__).parent.parent / "config_rag.yaml"
+    """Load configuration from config.yaml"""
+    config_path = Path(__file__).parent.parent / "config.yaml"
     if not config_path.exists():
-        raise FileNotFoundError("config_rag.yaml not found")
+        raise FileNotFoundError("config.yaml not found")
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
 class DocumentManager:
-    def __init__(self, config: Dict[str, Any], force_reindex: bool = False):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize the knowledge graph system.
         
         Args:
             config: Configuration dictionary
-            force_reindex: Whether to force re-indexing of documents
         """
         self.config = config
         self.bm25_retriever = BM25Retriever(config)
@@ -52,37 +51,8 @@ class DocumentManager:
         self.indexed = False # Initialize indexed state
         self.doc_types = set()  # Track available document types
 
-        if force_reindex:
-            logging.info("Force reindex requested. Running index_documents.py...")
-            try:
-                # Run index_documents.py script
-                index_script = Path(__file__).parent.parent / "index_documents.py"
-                if not index_script.exists():
-                    raise FileNotFoundError(f"index_documents.py not found at {index_script}")
-                
-                import subprocess
-                result = subprocess.run([sys.executable, str(index_script), '--force', '--build-bm25', '--debug'], 
-                                     capture_output=True, text=True)
-                
-                if result.returncode != 0:
-                    logging.error(f"Error running index_documents.py: {result.stderr}")
-                    raise RuntimeError("Failed to run index_documents.py")
-                    
-                # Log timing information from the output
-                if result.stdout:
-                    logging.info(result.stdout)
-                
-                logging.info("index_documents.py completed successfully")
-                
-                # After reindexing, load the new index
-                self.load_index()
-                logging.info("Re-indexing complete. Continuing with dashboard.")
-            except Exception as e:
-                logging.error(f"Error during re-indexing: {e}")
-                raise
-
-        # If not forcing reindex, check if index exists and load as needed
-        elif not self.bm25_retriever.documents:
+        # Check if index exists and load as needed
+        if not self.bm25_retriever.documents:
             logging.info("No existing index found. Please run index_documents.py first.")
             self.load_index() # Try to load index from disk
         else:
@@ -490,12 +460,11 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Run the knowledge graph visualization dashboard')
-parser.add_argument('--reindex', action='store_true', help='Force re-indexing of documents at startup')
 args = parser.parse_args()
 
 # Initialize configuration and knowledge graph
 config = load_config()
-kg = DocumentManager(config, force_reindex=args.reindex)
+kg = DocumentManager(config)
 graph_manager = GraphManager()
 
 # Global state for pagination

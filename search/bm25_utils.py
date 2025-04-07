@@ -87,9 +87,14 @@ class BM25Retriever:
         """Initialize the BM25 retriever with configuration"""
         self.config = config
         if config is None:
-            config_path = Path("config_rag.yaml")
+            # Get the directory of the current script
+            script_dir = Path(__file__).parent
+            # Get the parent directory (project root)
+            project_root = script_dir.parent
+            # Use the project root for config path
+            config_path = project_root / "config.yaml"
             if not config_path.exists():
-                raise FileNotFoundError("config_rag.yaml not found")
+                raise FileNotFoundError(f"config.yaml not found at {config_path}")
             with open(config_path, 'r') as f:
                 self.config = yaml.safe_load(f)
         elif hasattr(config, 'rag_config'):

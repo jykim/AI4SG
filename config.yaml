@@ -16,6 +16,21 @@ min_process_interval: 600  # Minimum seconds between processing runs (10 minutes
 max_entries_for_prompt: 20  # Maximum number of recent entries to include in agent prompt
 max_word_count: 30  # Maximum number of words to show before truncating chat messages
 
+# Logging Settings
+log_level: "INFO"  # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # Log format
+
+# BM25 Settings
+bm25:
+  k1: 1.5
+  b: 0.75
+  persistence:
+    enabled: true
+    directory: "bm25_index"
+  stemming:
+    enabled: false
+    language: "english"
+
 suggested_questions:
   - "마무리 할 일이 있나?"
   - "최근 잘한/반성할 일은?"

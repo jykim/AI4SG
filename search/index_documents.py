@@ -19,13 +19,21 @@ import json
 import sys
 import time
 
+# Increase CSV field size limit to handle large text fields
+csv.field_size_limit(sys.maxsize)
+
 # Import BM25Retriever for indexing
-from .ir_utils import BM25Retriever
+from bm25_utils import BM25Retriever
 
 class Config:
     """Configuration class to manage application settings"""
     def __init__(self, config_path: str = "config.yaml"):
-        self.config_path = config_path
+        # Get the directory of the current script
+        self.script_dir = Path(__file__).parent
+        # Get the parent directory (project root)
+        self.project_root = self.script_dir.parent
+        # Use the project root for config paths
+        self.config_path = self.project_root / config_path
         self.load_config()
         self.setup_directories()
 
@@ -45,15 +53,15 @@ class Config:
         self.index_dir = Path(os.path.expanduser(config.get('index_dir', '.')))
         self.output_dir = Path(config.get('output_dir', 'output'))
         
-        # Load RAG config if available
-        self.rag_config = {}
-        rag_config_path = Path("config_rag.yaml")
-        if rag_config_path.exists():
+        # Load config if available
+        self.config = {}
+        config_path = self.project_root / "config.yaml"
+        if config_path.exists():
             try:
-                with open(rag_config_path, 'r') as f:
-                    self.rag_config = yaml.safe_load(f)
+                with open(config_path, 'r') as f:
+                    self.config = yaml.safe_load(f)
             except Exception as e:
-                logging.warning(f"Could not load RAG config: {e}")
+                logging.warning(f"Could not load config: {e}")
 
     def setup_directories(self) -> None:
         """Create necessary directories if they don't exist"""
@@ -232,7 +240,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, any]:
         last_modified = datetime.fromtimestamp(path.stat().st_mtime)
         date = last_modified.strftime('%Y-%m-%d')
         
-        # Get modification time for incremental indexing
+        # Get modification time
         mtime = path.stat().st_mtime
         
         # Read file content
@@ -252,7 +260,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, any]:
             'size': size,
             'internal_links': [],
             'external_links': [],
-            'mtime': mtime  # Add modification time for incremental indexing
+            'mtime': mtime  # File modification time
         }
         
         # Extract YAML frontmatter if present
@@ -303,7 +311,7 @@ def extract_metadata(file_path: str, debug: bool = False) -> Dict[str, any]:
             'mtime': 0  # Default mtime for error cases
         }
 
-def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int] = None, incremental: bool = False) -> Tuple[List[Dict], Dict[str, float]]:
+def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int] = None) -> Tuple[List[Dict], Dict[str, float]]:
     """
     Main indexing function that processes all document files in a directory.
     
@@ -311,13 +319,11 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
     1. Recursively find all document files
     2. Extract metadata for each file
     3. Apply file limit if specified
-    4. If incremental=True, only process files that have changed since last indexing
     
     Args:
         root_dir: Root directory to scan for document files
         debug: Enable detailed debug output
         max_files: Maximum number of files to process
-        incremental: Whether to perform incremental indexing
         
     Returns:
         Tuple of (entries_info, timing_stats)
@@ -338,29 +344,6 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
     files_processed = 0
     files_skipped = 0
     
-    # Load existing index for incremental indexing
-    existing_index = {}
-    if incremental:
-        load_start = time.time()
-        try:
-            index_file = config.output_dir / 'repo_index.csv'
-            if index_file.exists():
-                with open(index_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        # Store full path and mtime for comparison
-                        if 'full_path' in row and 'mtime' in row:
-                            try:
-                                existing_index[row['full_path']] = float(row['mtime'])
-                            except (ValueError, TypeError):
-                                # Handle cases where mtime might not be a valid float
-                                existing_index[row['full_path']] = 0
-                if debug:
-                    logging.info(f"Loaded {len(existing_index)} entries from existing index")
-        except Exception as e:
-            logging.warning(f"Failed to load existing index for incremental indexing: {e}")
-        timing_stats['load_existing_index'] = time.time() - load_start
-    
     # Walk through all directories recursively
     scan_start = time.time()
     md_files = list(root_path.rglob("*.md"))  # Get list of all markdown files
@@ -379,18 +362,6 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
             
         full_path = str(path.absolute())
         
-        # Check if file has changed for incremental indexing
-        if incremental and full_path in existing_index:
-            try:
-                current_mtime = path.stat().st_mtime
-                if current_mtime <= existing_index[full_path]:
-                    if debug:
-                        logging.info(f"Skipping unchanged file: {full_path}")
-                    files_skipped += 1
-                    continue
-            except Exception as e:
-                logging.warning(f"Failed to check modification time for {full_path}: {e}")
-        
         # Extract metadata from file path
         metadata = extract_metadata(full_path, debug)
         
@@ -401,7 +372,6 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
             logging.info(f"\nProcessed {len(entries_info) + 1} files")
             if max_files:
                 logging.info(f"Progress: {len(entries_info) + 1} of {max_files}")
-            logging.info(f"Title: '{metadata['title']}'")
         
         entries_info.append({
             'full_path': full_path,
@@ -420,36 +390,11 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
     
     timing_stats['metadata_extraction'] = time.time() - metadata_start
     
-    # For incremental indexing, merge with existing entries
-    merge_start = time.time()
-    if incremental and existing_index:
-        try:
-            # Load all existing entries
-            existing_entries = []
-            index_file = config.output_dir / 'repo_index.csv'
-            if index_file.exists():
-                with open(index_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        # Skip entries that we've already updated
-                        if row['full_path'] not in [entry['full_path'] for entry in entries_info]:
-                            existing_entries.append(row)
-                            if debug:
-                                logging.info(f"Keeping existing entry: {row['full_path']}")
-            
-            # Combine existing entries with new/updated entries
-            entries_info = existing_entries + entries_info
-            
-            if debug:
-                logging.info(f"Merged {len(existing_entries)} existing entries with {len(entries_info) - len(existing_entries)} new/updated entries")
-                logging.info("New/updated entries:")
-                for entry in entries_info[len(existing_entries):]:
-                    logging.info(f"- {entry['full_path']} (mtime: {entry['mtime']})")
-        except Exception as e:
-            logging.warning(f"Failed to merge with existing entries: {e}")
-    
-    timing_stats['merge_entries'] = time.time() - merge_start
     timing_stats['total_time'] = time.time() - start_time
+    
+    # Add file counts to timing stats
+    timing_stats['files_processed'] = files_processed
+    timing_stats['files_skipped'] = files_skipped
     
     # Log timing information
     logging.info("\nIndexing Performance:")
@@ -458,25 +403,31 @@ def index_documents(root_dir: str, debug: bool = False, max_files: Optional[int]
     logging.info(f"Files skipped: {files_skipped}")
     logging.info("\nTiming breakdown:")
     for step, duration in timing_stats.items():
-        logging.info(f"{step}: {duration:.2f} seconds")
+        if step not in ['files_processed', 'files_skipped']:
+            logging.info(f"{step}: {duration:.2f} seconds")
     
     return entries_info, timing_stats
 
-def save_to_csv(entries_info: List[Dict], output_file: Path) -> None:
+def save_to_csv(entries_info: List[Dict], output_file: str = None):
     """
-    Save indexed documents to a CSV file.
+    Save the indexed documents to a CSV file.
     
     Process:
-    1. Read existing entries from CSV file if it exists
-    2. Process new/updated entries
-    3. Merge existing and updated entries
-    4. Write all entries to CSV file
+    1. Load existing entries if file exists
+    2. Merge new/updated entries with existing ones
+    3. Write all entries to CSV file
     
     Args:
-        entries_info: List of dictionaries containing file information and metadata
-        output_file: Path to the output CSV file
+        entries_info: List of dictionaries containing document metadata
+        output_file: Name of the output CSV file (default: from config)
     """
-    # Read existing entries from CSV file if it exists
+    if output_file is None:
+        output_file = config.output_dir / 'repo_index.csv'
+    
+    # Initialize BM25 retriever for tokenization
+    bm25_retriever = BM25Retriever(config.config)
+    
+    # Load existing entries if file exists
     existing_entries = {}
     if output_file.exists():
         try:
@@ -505,10 +456,30 @@ def save_to_csv(entries_info: List[Dict], output_file: Path) -> None:
             'full_path': str(entry.get('full_path', '')).strip().replace('\n', ' '),
             'mtime': str(entry.get('mtime', '0'))  # Add mtime field
         }
-        updated_entries[clean_entry['full_path']] = clean_entry
+        
+        # Only include entry if it's new or has been updated
+        full_path = clean_entry['full_path']
+        if full_path not in existing_entries or float(clean_entry['mtime']) > float(existing_entries[full_path].get('mtime', '0')):
+            # Tokenize content for new/updated entries
+            text = f"{clean_entry['title']} {clean_entry['content']} {clean_entry['tags']}"
+            if clean_entry['properties'] != '{}':
+                try:
+                    properties = json.loads(clean_entry['properties'])
+                    for key, value in properties.items():
+                        text += f" {key} {value}"
+                except:
+                    pass
+            clean_entry['tokenized_content'] = json.dumps(bm25_retriever.tokenizer(text))
+            updated_entries[full_path] = clean_entry
+        else:
+            # Use existing tokenized content for unchanged entries
+            clean_entry['tokenized_content'] = existing_entries[full_path].get('tokenized_content', '[]')
+            updated_entries[full_path] = clean_entry
     
     # Merge existing and updated entries
-    final_entries = {**existing_entries, **updated_entries}
+    final_entries = {**existing_entries}  # Start with all existing entries
+    final_entries.update(updated_entries)  # Update with only the changed entries
+    
     logging.info(f"Writing {len(final_entries)} total entries to {output_file}")
     logging.info(f"- {len(existing_entries)} existing entries")
     logging.info(f"- {len(updated_entries)} new/updated entries")
@@ -517,7 +488,7 @@ def save_to_csv(entries_info: List[Dict], output_file: Path) -> None:
     with open(output_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=[
             'date', 'title', 'content', 'properties', 'tags', 'path', 'size',
-            'internal_links', 'external_links', 'full_path', 'mtime'
+            'internal_links', 'external_links', 'full_path', 'mtime', 'tokenized_content'
         ])
         writer.writeheader()
         for entry in final_entries.values():
@@ -608,23 +579,11 @@ def build_bm25_index(entries_info: List[Dict]) -> None:
     """
     try:
         # Initialize BM25 retriever with config
-        bm25_retriever = BM25Retriever(config.rag_config)
+        bm25_retriever = BM25Retriever(config.config)
         
         # Convert entries to the format expected by BM25Retriever
         documents = []
         for entry in entries_info:
-            # Create document text that includes both content and metadata
-            text = f"{entry['title']} {entry['content']} {entry['tags']}"
-            
-            # Add properties if available
-            if 'properties' in entry and entry['properties']:
-                try:
-                    properties = json.loads(entry['properties'])
-                    for key, value in properties.items():
-                        text += f" {key} {value}"
-                except:
-                    pass
-            
             # Create document object
             doc = {
                 'doc_id': f"{entry['date']}_{entry['title']}",
@@ -644,6 +603,10 @@ def build_bm25_index(entries_info: List[Dict]) -> None:
                     doc.update(properties)
                 except:
                     pass
+            
+            # Use pre-tokenized content if available
+            if 'tokenized_content' in entry:
+                doc['tokenized_content'] = json.loads(entry['tokenized_content'])
             
             documents.append(doc)
         
@@ -683,12 +646,6 @@ def main():
     parser.add_argument('--force',
                        action='store_true',
                        help='Force a complete rebuild of the index')
-    parser.add_argument('--build-bm25',
-                       action='store_true',
-                       help='Build BM25 index for search')
-    parser.add_argument('--incremental',
-                       action='store_true',
-                       help='Perform incremental indexing (only process changed files)')
     args = parser.parse_args()
     
     # Update config if specified
@@ -703,31 +660,33 @@ def main():
     # If force option is used, remove existing index files
     if args.force:
         output_dir = config.output_dir
-        index_files = ['repo_index.csv', 'repo_index.md']
+        index_files = ['repo_index.csv', 'repo_index.md', 'bm25_index']
         for file in index_files:
             file_path = output_dir / file
             if file_path.exists():
                 logging.info(f"Removing existing index file: {file_path}")
-                file_path.unlink()
+                if file_path.is_dir():
+                    import shutil
+                    shutil.rmtree(file_path)
+                else:
+                    file_path.unlink()
     
     # Start timing for the entire process
     total_start_time = time.time()
     
     # Find and process all document files
-    entries_info, indexing_stats = index_documents(str(config.index_dir), args.debug, args.max_files, args.incremental)
+    entries_info, indexing_stats = index_documents(str(config.index_dir), args.debug, args.max_files)
     
     # Save results in both formats
     save_start_time = time.time()
-    save_to_csv(entries_info, config.output_dir / 'repo_index.csv')
+    save_to_csv(entries_info)
     save_to_markdown(entries_info)
     save_time = time.time() - save_start_time
     
-    # Build BM25 index if requested
-    bm25_time = 0
-    if args.build_bm25:
-        bm25_start_time = time.time()
-        build_bm25_index(entries_info)
-        bm25_time = time.time() - bm25_start_time
+    # Build BM25 index
+    bm25_start_time = time.time()
+    build_bm25_index(entries_info)
+    bm25_time = time.time() - bm25_start_time
     
     total_time = time.time() - total_start_time
     
@@ -736,28 +695,25 @@ def main():
           (f" (max: {args.max_files})" if args.max_files else "") + ".")
     
     if not args.debug:  # Only show entries if not in debug mode
-        logging.info(f"Generated {config.output_dir}/repo_index.csv and {config.output_dir}/repo_index.md with the following entries:")
-        for entry in entries_info:
-            logging.info(f"- {entry['date']} - {entry['title']}")
+        logging.info(f"Generated {config.output_dir}/repo_index.csv and {config.output_dir}/repo_index.md")
     
     # Print overall timing summary
     logging.info("\nOverall Performance Summary:")
     logging.info(f"Total processing time: {total_time:.2f} seconds")
     logging.info(f"Index saving time: {save_time:.2f} seconds")
-    if args.build_bm25:
-        logging.info(f"BM25 index build time: {bm25_time:.2f} seconds")
+    logging.info(f"BM25 index build time: {bm25_time:.2f} seconds")
     
     # Print detailed indexing stats if available
     if indexing_stats:
         logging.info("\nDetailed Indexing Breakdown:")
         for step, duration in indexing_stats.items():
-            if step != 'total_time':  # Already shown in overall summary
+            if step not in ['total_time', 'files_processed', 'files_skipped']:
                 logging.info(f"  {step}: {duration:.2f} seconds")
         
         # Calculate and show percentage breakdown
         logging.info("\nTime Distribution:")
         for step, duration in indexing_stats.items():
-            if step != 'total_time':
+            if step not in ['total_time', 'files_processed', 'files_skipped']:
                 percentage = (duration / indexing_stats['total_time']) * 100
                 logging.info(f"  {step}: {percentage:.1f}%")
 

@@ -18,7 +18,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from rag_utils import JournalRAG
-from ir_utils import BM25Retriever
+from bm25_utils import BM25Retriever
 from rag_graph import create_graph_panel, load_document_data
 
 # Initialize configuration
