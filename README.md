@@ -25,6 +25,19 @@ Features:
 
 ![Screenshot of Dashboard](media/screenshot_reading.jpg)
 
+## Knowledge Graph Visualization
+
+A powerful graph-based visualization tool that helps you explore connections between your journal entries, reading materials, and other documents. The knowledge graph provides an interactive way to discover relationships and patterns in your personal knowledge base.
+
+Features:
+- **Interactive Graph**: Visualize connections between documents with an interactive network graph
+- **Semantic Search**: Find related documents based on content similarity
+- **Document Exploration**: Click on nodes to expand the graph and discover related content
+- **Document Type Filtering**: Filter by document type (journal, reading, etc.)
+- **Recent Entries**: Browse your most recent entries with pagination
+- **Detailed View**: View full document content and metadata when selecting a node
+
+![Screenshot of Knowledge Graph](media/kg_viz.jpg)
 
 ## Features
 
@@ -36,6 +49,8 @@ Features:
 - **API Caching**: Optimizes API usage by caching GPT-4 responses
 - **Reading History**: Tracks and visualizes reading activity across multiple platforms
 - **Book Management**: Rate and organize your reading materials
+- **Knowledge Graph**: Interactive visualization of document relationships and connections
+- **Semantic Search**: Find related documents based on content similarity
 
 ## Prerequisites
 
@@ -90,6 +105,13 @@ python dash_reading.py
 
 The reading dashboard will be available at http://127.0.0.1:8051/
 
+Start the knowledge graph visualization:
+```bash
+python dash/dash_graph.py
+```
+
+The knowledge graph dashboard will be available at http://127.0.0.1:8052/
+
 ### Manual Processing
 
 1. Extract journal entries:
@@ -102,6 +124,11 @@ python extract_journal.py
 python annotate_journal.py --input journal_entries.csv
 ```
 
+3. Index documents for the knowledge graph:
+```bash
+python index_documents.py
+```
+
 ### Dashboard Features
 
 - **Timeline View**: Visual representation of entries over time
@@ -110,6 +137,15 @@ python annotate_journal.py --input journal_entries.csv
 - **Date Range**: Filter entries by date
 - **Auto-Update**: Dashboard refreshes automatically when new entries are found
 - **Manual Refresh**: Press Ctrl+Z to force a refresh of entries
+
+### Knowledge Graph Features
+
+- **Interactive Graph**: Click and drag nodes to rearrange the graph
+- **Node Expansion**: Click on a document node to find related documents
+- **Document Details**: Hover over nodes to see document details
+- **Document Type Filtering**: Filter by document type (journal, reading, etc.)
+- **Recent Entries**: Browse your most recent entries with pagination
+- **Semantic Search**: Find related documents based on content similarity
 
 ### Chat and Agent Features
 
@@ -149,6 +185,10 @@ min_process_interval: 600  # Minimum seconds between processing runs
 max_entries_for_prompt: 10  # Maximum number of entries to include in GPT-4 prompts
 max_word_count: 30  # Maximum words to show in abbreviated messages
 
+# BM25 Search Settings
+bm25:
+  final_k: 10  # Number of results to return from BM25 search
+
 # UI Settings
 suggested_questions:  # Questions shown as quick-select buttons
   - "What's the status so far?"
@@ -172,6 +212,9 @@ suggested_questions:  # Questions shown as quick-select buttons
   - `min_process_interval`: Minimum time between automatic processing runs (seconds)
   - `max_entries_for_prompt`: Maximum number of entries to include in GPT-4 prompts
   - `max_word_count`: Maximum words to show in abbreviated messages
+
+- **BM25 Search Settings**:
+  - `final_k`: Number of results to return from BM25 search
 
 - **UI Settings**:
   - `suggested_questions`: List of questions shown as quick-select buttons in the chat interface
@@ -225,9 +268,14 @@ The test environment uses the same processing pipeline as the main application b
 ```
 AI4SG/
 ├── config.yaml           # Configuration file
-├── dash_journal.py       # Dashboard application
+├── dash_journal.py       # Journal dashboard application
+├── dash_reading.py       # Reading dashboard application
+├── dash/                 # Dashboard modules
+│   ├── dash_graph.py     # Knowledge graph visualization
+│   └── ...               # Other dashboard components
 ├── extract_journal.py    # Journal entry extraction
 ├── annotate_journal.py   # Semantic analysis
+├── index_documents.py    # Document indexing for knowledge graph
 ├── tagging_prompt.md     # GPT-4 prompt template
 ├── input/               # Raw journal files
 ├── output/              # Processed files
