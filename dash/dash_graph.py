@@ -1034,4 +1034,4 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
 
 if __name__ == "__main__":
     # Run the app
-    app.run_server(debug=True, port=8052) 
+    app.run(debug=True, port=8052) 

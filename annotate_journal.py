@@ -58,8 +58,16 @@ class Config:
         self.min_process_interval = config.get('min_process_interval', 600)
         
         # API key should be set via environment variable
-        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
-        if not self.openai_api_key:
+        api_key = os.getenv('OPENAI_API_KEY', '')
+        if api_key:
+            # Clean the API key by removing newlines and whitespace
+            api_key = ''.join(api_key.split())
+            self.openai_api_key = api_key
+            # Set the API key for the openai client
+            openai.api_key = api_key
+            logging.debug("OpenAI API key set successfully")
+        else:
+            self.openai_api_key = ''
             logging.warning("No OpenAI API key found in environment variables")
 
     def setup_directories(self) -> None:

@@ -586,7 +586,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
                                     },
                                     'backgroundColor': hex_to_rgba(get_emotion_color(state.df, emotion, state.df))
                                 }
-                                for emotion in state.df['emotion'].unique() if state.df is not None and emotion
+                                for emotion in (state.df['emotion'].unique() if state.df is not None and not state.df.empty else []) if emotion
                             ] + [
                                 {
                                     'if': {
@@ -1000,6 +1000,24 @@ def main() -> None:
     # Set app title
     app.title = "Journal Dashboard"
     
+    # Check if journal file exists and run extraction/annotation if needed
+    journal_file = config.output_dir / 'journal_entries_annotated.csv'
+    if not journal_file.exists():
+        logging.info("Journal file not found. Running initial extraction and annotation...")
+        state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+    else:
+        logging.info(f"Journal file found at {journal_file}")
+        # Check if the file is empty or has only headers
+        try:
+            df = pd.read_csv(journal_file)
+            if df.empty or len(df) <= 1:  # Only headers or empty
+                logging.info("Journal file is empty or has only headers. Running extraction and annotation...")
+                state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+        except Exception as e:
+            logging.error(f"Error reading journal file: {e}")
+            logging.info("Running extraction and annotation to fix corrupted file...")
+            state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+    
     background_thread = threading.Thread(
         target=background_processor,
         args=(args.retag_all,),
@@ -1007,7 +1025,7 @@ def main() -> None:
     )
     background_thread.start()
 
-    app.run_server(debug=False, port=8050)
+    app.run(debug=False, port=8050)
 
 def save_feedback(message_id: str, feedback: str, config: Optional[Config] = None) -> None:
     """Save feedback for a chat message to CSV file.
