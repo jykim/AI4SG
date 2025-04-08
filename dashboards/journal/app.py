@@ -28,8 +28,11 @@ from typing import Optional, Tuple, Dict, Any, List
 import json
 import sys
 
-# Add parent directory to Python path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+# Add project root to sys.path when running directly
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Third-party imports
 import dash
@@ -41,8 +44,8 @@ import plotly.graph_objects as go
 import yaml
 
 # Local imports
-from agent_utils import get_chat_response, get_todays_chat_log, Config as AgentConfig
-from chat_utils import (
+from dashboards.common.agent_utils import get_chat_response, get_todays_chat_log, Config as AgentConfig
+from dashboards.common.chat_utils import (
     parse_message_timestamp,
     extract_message_content,
     extract_message_timestamp,
@@ -53,7 +56,8 @@ from chat_utils import (
 )
 
 # Get root directory
-ROOT_DIR = Path(__file__).parent.parent
+# Ensure ROOT_DIR uses the same calculation as PROJECT_ROOT for consistency
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:
     """Configuration class to manage application settings"""
@@ -296,12 +300,12 @@ class DashboardState:
 
             # Run extraction
             logging.info("Starting journal extraction and annotation process...")
-            extract_script = ROOT_DIR / 'extract_journal.py'
+            extract_script = ROOT_DIR / 'dashboards' / 'journal' / 'extract_journal.py'
             if not self._run_script(['python', str(extract_script)], env):
                 return False
 
             # Run annotation with the new input file
-            annotate_script = ROOT_DIR / 'annotate_journal.py'
+            annotate_script = ROOT_DIR / 'dashboards' / 'journal' / 'annotate_journal.py'
             cmd = ['python', str(annotate_script), '--input', 'journal_entries.csv']
             if retag_all:
                 cmd.append('--retag-all')
@@ -944,6 +948,7 @@ def update_journal_data_store(table_data):
     """Update the journal data store when table data changes"""
     return table_data
 
+# Restore background processing functions
 def handle_sigtstp(signum: int, frame: Any) -> None:
     """Handle Ctrl+Z (SIGTSTP) signal"""
     logging.info("Received Ctrl+Z signal, triggering extraction and annotation...")
@@ -960,39 +965,47 @@ def background_processor(retag_all: bool = False) -> None:
         # Check if it's a new day
         if last_date is None or current_date > last_date:
             logging.info(f"New day detected: {current_date}, updating visualizations")
-            state.run_extraction_and_annotation(retag_all=retag_all, force=True)
-            last_date = current_date
-            state.update_event.set()
-        
-        # Only run if enough time has passed since last run
-        if current_time - state.last_process_time >= config.min_process_interval:
-            state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
-        
-        # Check for content changes every 5 seconds
-        new_df = state.load_data()
-        if new_df is not None and state.df is not None:
-            # Compare number of rows
-            if len(new_df) != len(state.df):
-                logging.info("Number of entries changed, updating dashboard")
-                state.df = new_df
+            # Assuming state is globally accessible or passed appropriately
+            if 'state' in globals():
+                state.run_extraction_and_annotation(retag_all=retag_all, force=True)
+                last_date = current_date
                 state.update_event.set()
             else:
-                # Compare content of each row
-                for col in new_df.columns:
-                    if col in state.df.columns:
-                        if not (new_df[col].astype(str) == state.df[col].astype(str)).all():
-                            logging.info(f"Content changed in column {col}, updating dashboard")
-                            state.df = new_df
-                            state.update_event.set()
-                            break
+                logging.warning("Global state object not found for background processor.")
+
+        # Only run if enough time has passed since last run
+        if 'state' in globals() and current_time - state.last_process_time >= config.min_process_interval:
+             state.run_extraction_and_annotation(retag_all=retag_all, force=False)  # Don't force automatic runs
+        
+        # Check for content changes every 5 seconds
+        if 'state' in globals():
+            new_df = state.load_data()
+            if new_df is not None and state.df is not None:
+                # Compare number of rows
+                if len(new_df) != len(state.df):
+                    logging.info("Number of entries changed, updating dashboard")
+                    state.df = new_df
+                    state.update_event.set()
+                else:
+                    # Compare content of each row
+                    for col in new_df.columns:
+                        if col in state.df.columns:
+                            if not (new_df[col].astype(str) == state.df[col].astype(str)).all():
+                                logging.info(f"Content changed in column {col}, updating dashboard")
+                                state.df = new_df
+                                state.update_event.set()
+                                break
         
         time.sleep(5)  # Check every 5 seconds
 
+# Restore main function
 def main() -> None:
-    """Main entry point for the dashboard"""
+    """Main entry point for the dashboard when run as script"""
     parser = argparse.ArgumentParser(description='Journal Reflections Dashboard')
     parser.add_argument('--retag-all', action='store_true',
                        help='Re-tag all entries from scratch on startup')
+    parser.add_argument('--port', type=int, default=8050, help='Port to run the dashboard on')
+    parser.add_argument('--debug', action='store_true', help='Run in debug mode')
     args = parser.parse_args()
 
     signal.signal(signal.SIGTSTP, handle_sigtstp)
@@ -1000,24 +1013,40 @@ def main() -> None:
     # Set app title
     app.title = "Journal Dashboard"
     
+    # Initialize state explicitly if not done already
+    global state
+    if 'state' not in globals():
+         state = DashboardState(config)
+         state.df = state.load_data()
+         if state.df is not None:
+             state.last_entries_count = len(state.df)
+         # Need to re-create layout if state was just created
+         app.layout = create_layout(state)
+
     # Check if journal file exists and run extraction/annotation if needed
     journal_file = config.output_dir / 'journal_entries_annotated.csv'
     if not journal_file.exists():
         logging.info("Journal file not found. Running initial extraction and annotation...")
         state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+        state.df = state.load_data() # Reload data after processing
+        app.layout = create_layout(state) # Update layout with new data
     else:
         logging.info(f"Journal file found at {journal_file}")
-        # Check if the file is empty or has only headers
-        try:
-            df = pd.read_csv(journal_file)
-            if df.empty or len(df) <= 1:  # Only headers or empty
-                logging.info("Journal file is empty or has only headers. Running extraction and annotation...")
-                state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
-        except Exception as e:
-            logging.error(f"Error reading journal file: {e}")
-            logging.info("Running extraction and annotation to fix corrupted file...")
-            state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+        # Check if the file is empty or has only headers (Optional check)
+        # try:
+        #     df_check = pd.read_csv(journal_file)
+        #     if df_check.empty or len(df_check) <= 1:  
+        #         logging.info("Journal file is empty/headers only. Running extraction...")
+        #         state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+        #         state.df = state.load_data()
+        #         app.layout = create_layout(state)
+        # except Exception as e:
+        #     logging.error(f"Error checking journal file: {e}. Running extraction...")
+        #     state.run_extraction_and_annotation(retag_all=args.retag_all, force=True)
+        #     state.df = state.load_data()
+        #     app.layout = create_layout(state)
     
+    # Start background processor thread
     background_thread = threading.Thread(
         target=background_processor,
         args=(args.retag_all,),
@@ -1025,7 +1054,8 @@ def main() -> None:
     )
     background_thread.start()
 
-    app.run(debug=False, port=8050)
+    logging.info(f"Running Journal dashboard on http://127.0.0.1:{args.port}/")
+    app.run(debug=args.debug, port=args.port)
 
 def save_feedback(message_id: str, feedback: str, config: Optional[Config] = None) -> None:
     """Save feedback for a chat message to CSV file.
@@ -1091,5 +1121,6 @@ def handle_feedback(thumbs_up_clicks, thumbs_down_clicks):
     else:
         return {'opacity': '0.3'}, {'opacity': '1.0'}
 
+# Restore main execution block
 if __name__ == '__main__':
     main()

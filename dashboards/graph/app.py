@@ -9,8 +9,14 @@ including document indexing and retrieval capabilities.
 import sys
 from pathlib import Path
 import argparse
-# Add parent directory to Python path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+
+# Add project root to sys.path when running directly
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Remove sys.path manipulation if present
+# sys.path.append(str(Path(__file__).parent.parent.parent))
 
 import dash
 from dash import html, dcc, Input, Output, State, callback
@@ -32,7 +38,8 @@ cyto.load_extra_layouts()
 # Initialize configuration
 def load_config():
     """Load configuration from config.yaml"""
-    config_path = Path(__file__).parent.parent / "config.yaml"
+    # Adjust config_path
+    config_path = Path(__file__).parent.parent.parent / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError("config.yaml not found")
     with open(config_path, 'r') as f:
@@ -67,8 +74,8 @@ class DocumentManager:
     def load_indexed_documents(self) -> pd.DataFrame:
         """Load documents from the indexed CSV file."""
         try:
-            # Get path relative to dash directory
-            output_dir = Path(__file__).parent.parent / 'output'
+            # Adjust output_dir path
+            output_dir = Path(__file__).parent.parent.parent / 'output'
             indexed_file = output_dir / 'repo_index.csv'
             if not indexed_file.exists():
                 logging.warning(f"No indexed documents found in {output_dir}")
@@ -132,8 +139,8 @@ class DocumentManager:
     def load_index(self):
         """Load the BM25 index from disk."""
         try:
-            # Get path relative to dash directory
-            output_dir = Path(__file__).parent.parent / 'output'
+            # Adjust output_dir path
+            output_dir = Path(__file__).parent.parent.parent / 'output'
             bm25_index_dir = output_dir / 'bm25_index'
             
             if not bm25_index_dir.exists():
@@ -458,18 +465,8 @@ class GraphManager:
 # Initialize the Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
-# Parse command line arguments
-parser = argparse.ArgumentParser(description='Run the knowledge graph visualization dashboard')
-args = parser.parse_args()
-
-# Initialize configuration and knowledge graph
-config = load_config()
-kg = DocumentManager(config)
-graph_manager = GraphManager()
-
 # Global state for pagination
 current_page = 0
-entries_per_page = 10
 
 # App layout
 app.layout = dbc.Container([
@@ -1032,6 +1029,40 @@ def handle_recent_entry_click(n_clicks_list, result_data_list):
     
     return elements, details_content
 
-if __name__ == "__main__":
-    # Run the app
-    app.run(debug=True, port=8052) 
+# Add main function and execution block for running directly
+def main():
+    # Configure basic logging if needed
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Knowledge Graph Dashboard')
+    parser.add_argument('--port', type=int, default=8052, help='Port to run the dashboard on') # Use a different default port
+    parser.add_argument('--debug', action='store_true', help='Run in debug mode')
+    args = parser.parse_args()
+
+    # Load configuration
+    config = load_config()
+
+    # Initialize managers - Define kg and graph_manager globally or pass them
+    # Making them global for simplicity in this context
+    global kg, graph_manager
+    kg = DocumentManager(config)
+    graph_manager = GraphManager()
+
+    # Update doc type options based on loaded data
+    # (This might need adjustment depending on how state is handled)
+    # update_doc_type_options(None, None) 
+
+    # Load initial recent entries (if applicable)
+    # (This might need adjustment)
+    # load_recent_entries(None, None, 'all', None)
+
+    # Start the server
+    logging.info(f"Running Graph dashboard on http://127.0.0.1:{args.port}/")
+    app.title = "Graph Dashboard"
+    app.run(debug=args.debug, port=args.port)
+
+if __name__ == '__main__':
+    import argparse # Import argparse locally for main
+    main()

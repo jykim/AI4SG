@@ -4,13 +4,9 @@ A Dash web application for managing and reading text files with encoding support
 Specifically designed for handling Korean text files with various encodings.
 """
 
-import sys
-from pathlib import Path
-# Add parent directory to Python path for imports
-sys.path.append(str(Path(__file__).parent.parent))
-
 import orjson
 import dash
+import sys # Add sys import
 from dash import html, dcc, dash_table
 import pandas as pd
 from dash.dependencies import Input, Output, State
@@ -25,8 +21,18 @@ import subprocess
 import logging
 import random
 
-# Import extraction script functionality
-from extract_reading import Config, index_txt_files, save_to_csv, save_to_markdown
+# Add project root to sys.path when running directly
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Import extraction script functionality using relative import
+try:
+    from .extract_reading import Config, index_txt_files, save_to_csv, save_to_markdown
+except ImportError:
+    # Fallback for running the script directly
+    from extract_reading import Config, index_txt_files, save_to_csv, save_to_markdown
 
 # Initialize the Dash app with specific orjson settings
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -49,7 +55,8 @@ SOURCE_COLORS = {
 }
 
 # Get root directory
-ROOT_DIR = Path(__file__).parent.parent
+# Adjust path to go up three levels instead of two
+ROOT_DIR = Path(__file__).parent.parent.parent
 
 def run_extraction():
     """Run the extraction script to update reading entries."""
@@ -1056,14 +1063,24 @@ def get_button_style(stars, current_rating, is_first):
     style['opacity'] = '1' if stars <= current_rating else '0.5'
     return style
 
-# Run the app
+# Add main function and execution block
+def main():
+    parser = argparse.ArgumentParser(description='Reading Dashboard')
+    parser.add_argument('--port', type=int, default=8051, help='Port to run the dashboard on') # Use a different default port
+    parser.add_argument('--debug', action='store_true', help='Run in debug mode')
+    args = parser.parse_args()
+
+    # Uncomment to run extraction on startup
+    run_extraction() 
+    
+    logging.info(f"Running Reading dashboard on http://127.0.0.1:{args.port}/")
+    app.title = "Reading Dashboard"
+    app.run(debug=args.debug, port=args.port)
+
 if __name__ == '__main__':
-    # Run extraction first
-    if not run_extraction():
-        print("Warning: Extraction script failed, but continuing with dashboard...")
-    
-    # Configure server to suppress GET/POST messages
-    logging.getLogger('werkzeug').setLevel(logging.ERROR)
-    
-    # Start the server
-    app.run_server(debug=False, port=8051) 
+    import argparse # Import argparse locally for main
+    import logging # Import logging locally for main
+    # Setup basic logging if not already configured
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    main() 
