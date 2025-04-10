@@ -153,7 +153,8 @@ def load_prompt_template():
     Raises:
         FileNotFoundError: If tagging_prompt.md is not found
     """
-    with open('tagging_prompt.md', 'r', encoding='utf-8') as f:
+    prompt_path = Path(__file__).parent / 'tagging_prompt.md'
+    with open(prompt_path, 'r', encoding='utf-8') as f:
         return f.read()
 
 def get_tags_for_entry(content, config=None):
@@ -170,6 +171,10 @@ def get_tags_for_entry(content, config=None):
     """
     if config is None:
         config = Config()
+    
+    # Validate API key
+    if not config.openai_api_key:
+        raise ValueError("OpenAI API key is not set. Please set the OPENAI_API_KEY environment variable.")
     
     # Truncate content if too long (to avoid token limit)
     max_chars = 2000
@@ -194,13 +199,30 @@ def get_tags_for_entry(content, config=None):
             print("\nSending request to OpenAI API...")
             print("(Using prompt: Journal entry analysis for tags [emotion/topic/etc])")
             
-            response = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that analyzes journal entries and provides semantic tags in English, even for Korean text."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
+            try:
+                response = openai.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that analyzes journal entries and provides semantic tags in English, even for Korean text."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+            except openai.APIConnectionError as e:
+                print(f"Connection error: {e}")
+                print("Please check your internet connection and try again.")
+                return {}, None
+            except openai.AuthenticationError as e:
+                print(f"Authentication error: {e}")
+                print("Please check your OpenAI API key is correct.")
+                return {}, None
+            except openai.RateLimitError as e:
+                print(f"Rate limit error: {e}")
+                print("Please wait a moment and try again.")
+                return {}, None
+            except openai.APIError as e:
+                print(f"OpenAI API error: {e}")
+                print("Please try again later.")
+                return {}, None
             
             # Extract tags from response
             tags_text = response.choices[0].message.content

@@ -1035,6 +1035,9 @@ def main():
     if not logging.getLogger().hasHandlers():
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+    # Filter out Werkzeug's GET/POST logs
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
     # Parse arguments
     parser = argparse.ArgumentParser(description='Knowledge Graph Dashboard')
     parser.add_argument('--port', type=int, default=8052, help='Port to run the dashboard on') # Use a different default port

@@ -44,8 +44,8 @@ import plotly.graph_objects as go
 import yaml
 
 # Local imports
-from dashboards.common.agent_utils import get_chat_response, get_todays_chat_log, Config as AgentConfig
-from dashboards.common.chat_utils import (
+from apps.common.agent_utils import get_chat_response, get_todays_chat_log, Config as AgentConfig
+from apps.common.chat_utils import (
     parse_message_timestamp,
     extract_message_content,
     extract_message_timestamp,
@@ -126,7 +126,7 @@ logging.basicConfig(
 # Filter out Dash's GET request logs
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
-class DashboardState:
+class AppState:
     """Manages the global state of the dashboard"""
     def __init__(self, config: Optional[Config] = None):
         self.is_processing = False
@@ -300,12 +300,12 @@ class DashboardState:
 
             # Run extraction
             logging.info("Starting journal extraction and annotation process...")
-            extract_script = ROOT_DIR / 'dashboards' / 'journal' / 'extract_journal.py'
+            extract_script = ROOT_DIR / 'apps' / 'journal' / 'extract_journal.py'
             if not self._run_script(['python', str(extract_script)], env):
                 return False
 
             # Run annotation with the new input file
-            annotate_script = ROOT_DIR / 'dashboards' / 'journal' / 'annotate_journal.py'
+            annotate_script = ROOT_DIR / 'apps' / 'journal' / 'annotate_journal.py'
             cmd = ['python', str(annotate_script), '--input', 'journal_entries.csv']
             if retag_all:
                 cmd.append('--retag-all')
@@ -407,10 +407,10 @@ def get_emotion_color(df: pd.DataFrame, emotion: str, full_df: pd.DataFrame = No
         color_str = color_str.split('&')[0].strip()
     return color_str
 
-def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
+def create_layout(state: Optional[AppState] = None) -> dbc.Container:
     """Create the dashboard layout"""
     if state is None:
-        state = DashboardState()
+        state = AppState()
     
     # Calculate default date range (past 14 days + future 7 days)
     if state.df is not None and not state.df.empty:
@@ -662,7 +662,7 @@ def create_layout(state: Optional[DashboardState] = None) -> dbc.Container:
     ], fluid=True, className="px-4 h-100")
 
 # Initialize global state
-state = DashboardState()
+state = AppState()
 state.df = state.load_data()
 if state.df is not None:
     state.last_entries_count = len(state.df)
@@ -1016,7 +1016,7 @@ def main() -> None:
     # Initialize state explicitly if not done already
     global state
     if 'state' not in globals():
-         state = DashboardState(config)
+         state = AppState(config)
          state.df = state.load_data()
          if state.df is not None:
              state.last_entries_count = len(state.df)

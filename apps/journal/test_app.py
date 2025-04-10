@@ -2,9 +2,9 @@ import logging
 from pathlib import Path
 import dash
 import dash_bootstrap_components as dbc
-from dash_journal import (
+from apps.journal.app import (
     Config as BaseConfig,
-    DashboardState,
+    AppState,
     create_layout,
     update_table_and_timeline,
     state as global_state
@@ -13,6 +13,7 @@ from datetime import datetime
 import pandas as pd
 from dash import Input, Output, html
 import os
+import pytest
 
 # Configure basic logging first
 logging.basicConfig(
@@ -23,60 +24,19 @@ logging.basicConfig(
     ]
 )
 
-class TestConfig(BaseConfig):
-    """Test configuration class for the Dash app"""
-    def __init__(self):
-        # Don't call parent's __init__ since we want to override everything
-        self.output_dir = Path('test_data/output')
-        self.max_word_count = 50  # Maximum number of words to show in abbreviated messages
-        self.chat_log_path = self.output_dir / 'chat_log_test.md'
-        self.journal_entries_path = self.output_dir / 'journal_entries_annotated.csv'
-        self.agent_cache_dir = Path('test_data/agent_cache')
-        self.suggested_questions = [
-            "How was your day?",
-            "What did you learn today?",
-            "What are your goals for tomorrow?"
-        ]
-        # Call load_config to set up remaining values and create directories
-        self.load_config()
-        
-    def load_config(self) -> None:
-        """Override config to use test data directory"""
-        config = {
-            'input_dir': 'input',
-            'output_dir': 'test_data/output',
-            'api_cache_dir': 'test_data/api_cache',
-            'agent_cache_dir': 'test_data/agent_cache',  # Add agent cache directory
-            'min_process_interval': 0  # No delay for testing
-        }
-        
-        # Set configuration values
-        self.input_dir = Path(config.get('input_dir', 'input'))
-        self.output_dir = Path(config.get('output_dir', 'test_data/output'))
-        self.api_cache_dir = Path(config.get('api_cache_dir', 'test_data/api_cache'))
-        self.agent_cache_dir = Path(config.get('agent_cache_dir', 'test_data/agent_cache'))  # Set agent cache directory
-        self.min_process_interval = config.get('min_process_interval', 0)
-        
-        # Use actual API key from environment
-        self.openai_api_key = os.getenv('OPENAI_API_KEY', '')
-        if not self.openai_api_key:
-            logging.warning("No OpenAI API key found in environment variables")
-        
-        # Create all necessary directories
-        self.setup_directories()
-        
-    def setup_directories(self) -> None:
-        """Create necessary directories if they don't exist"""
-        for directory in [self.input_dir, self.output_dir, self.api_cache_dir, self.agent_cache_dir]:
-            directory.mkdir(parents=True, exist_ok=True)
+@pytest.fixture
+def test_config():
+    return BaseConfig()
 
-    def get_chat_log_path(self) -> Path:
-        """Override to use test chat log"""
-        return self.chat_log_path
-        
-    def get_todays_chat_log(self) -> str:
-        """Override to return empty string, preventing chat history from being loaded"""
-        return ""
+class TestConfig:
+    """Test configuration loading and validation"""
+    
+    def test_load_config(self, test_config):
+        """Test loading configuration from file"""
+        test_config.load_config()
+        assert test_config.input_dir.exists()
+        assert test_config.output_dir.exists()
+        assert test_config.api_cache_dir.exists()
 
 def set_test_date(df: pd.DataFrame) -> None:
     """Set today's date to match the latest date in test data"""

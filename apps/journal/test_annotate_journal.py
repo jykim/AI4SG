@@ -3,11 +3,12 @@ import sys
 import os
 from pathlib import Path
 import openai
+import pytest
 
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from annotate_journal import (
+from apps.journal.annotate_journal import (
     Config as BaseConfig,
     update_csv_with_tags,
     get_tags_for_entry
@@ -25,53 +26,39 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-class TestConfig(BaseConfig):
-    """Test configuration class that overrides paths for testing"""
-    def load_config(self) -> None:
-        """Override config to use test data directory"""
-        # Get the absolute path of the test directory
-        test_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-        test_data_dir = test_dir / 'test_data'
-        
-        config = {
-            'input_dir': str(test_data_dir / 'input'),
-            'output_dir': str(test_data_dir / 'output'),
-            'api_cache_dir': str(test_data_dir / 'api_cache'),
-            'min_process_interval': 0  # No delay for testing
-        }
-        
-        # Set configuration values using absolute paths
-        self.input_dir = Path(config['input_dir'])
-        self.output_dir = Path(config['output_dir'])
-        self.api_cache_dir = Path(config['api_cache_dir'])
-        self.min_process_interval = config['min_process_interval']
-        
-        # Use actual API key from environment and clean it
-        api_key = os.getenv('OPENAI_API_KEY', '')
-        if api_key:
-            # Remove newlines and extra whitespace
-            api_key = ''.join(api_key.split())
-            logger.debug(f"API Key found with length: {len(api_key)}")
-            
-            # Set the API key for both the config and the openai client
-            self.openai_api_key = api_key
-            openai.api_key = api_key
-            logger.info("OpenAI API key set successfully")
-        else:
-            logger.warning("No OpenAI API key found in environment variables")
-            self.openai_api_key = ''
+@pytest.fixture
+def test_config():
+    config = BaseConfig()
+    # Load API key from environment
+    config.openai_api_key = os.getenv('OPENAI_API_KEY', '')
+    if not config.openai_api_key:
+        pytest.skip("OpenAI API key not found in environment")
+    openai.api_key = config.openai_api_key
+    return config
 
-def test_api_connection(config):
+class TestConfig:
+    """Test configuration loading and validation"""
+    
+    def test_load_config(self, test_config):
+        """Test loading configuration from file"""
+        test_config.load_config()
+        assert test_config.input_dir.exists()
+        assert test_config.output_dir.exists()
+        assert test_config.api_cache_dir.exists()
+
+def test_api_connection(test_config):
     """Test the API connection with a simple entry"""
     logger.info("Testing API connection...")
     test_content = "This is a test entry."
-    try:
-        tags, title = get_tags_for_entry(test_content, config)
-        logger.info(f"API test result - Tags: {tags}, Title: {title}")
-        return True
-    except Exception as e:
-        logger.error(f"API connection test failed: {str(e)}", exc_info=True)
-        return False
+    
+    tags, title = get_tags_for_entry(test_content, test_config)
+    logger.info(f"API test result - Tags: {tags}, Title: {title}")
+    
+    assert tags is not None, "Tags should not be None"
+    assert isinstance(tags, dict), "Tags should be a dictionary"
+    assert 'emotion' in tags or tags == {}, "Tags should contain emotion or be empty"
+    assert 'topic' in tags or tags == {}, "Tags should contain topic or be empty"
+    assert 'etc' in tags or tags == {}, "Tags should contain etc or be empty"
 
 def main():
     # Initialize test configuration

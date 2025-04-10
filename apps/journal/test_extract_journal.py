@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
-from extract_journal import (
+from apps.journal.extract_journal import (
     Config as BaseConfig,
     process_markdown_file,
     main as base_main
 )
+import pytest
 
 # Configure basic logging first
 logging.basicConfig(
@@ -15,22 +16,19 @@ logging.basicConfig(
     ]
 )
 
-class TestConfig(BaseConfig):
-    """Test configuration class that overrides paths for testing"""
-    def load_config(self) -> None:
-        """Override config to use test data directory"""
-        config = {
-            'input_dir': 'input',
-            'output_dir': 'test_data/output',
-            'api_cache_dir': 'api_cache',
-            'journal_dir': 'test_data/input'
-        }
-        
-        # Set configuration values
-        self.input_dir = Path(config.get('input_dir', 'input'))
-        self.output_dir = Path(config.get('output_dir', 'test_data/output'))
-        self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
-        self.journal_dir = Path(config.get('journal_dir', 'test_data/input'))
+@pytest.fixture
+def test_config():
+    return BaseConfig()
+
+class TestConfig:
+    """Test configuration loading and validation"""
+    
+    def test_load_config(self, test_config):
+        """Test loading configuration from file"""
+        test_config.load_config()
+        assert test_config.input_dir.exists()
+        assert test_config.output_dir.exists()
+        assert test_config.api_cache_dir.exists()
 
 def main():
     # Initialize test configuration
