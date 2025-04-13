@@ -17,6 +17,7 @@ index_dir: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024"  # D
 openai_api_key: ""  # Your OpenAI API key (should be set via environment variable)
 
 # Processing Settings
+single_entry_mode: false  # If true, treat each markdown file as a single entry without section parsing
 min_process_interval: 600  # Minimum seconds between processing runs (10 minutes)
 max_entries_for_prompt: 20  # Maximum number of recent entries to include in agent prompt
 max_word_count: 30  # Maximum number of words to show before truncating chat messages

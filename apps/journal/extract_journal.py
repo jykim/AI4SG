@@ -24,7 +24,8 @@ class Config:
                 'input_dir': 'input',
                 'output_dir': 'output',
                 'api_cache_dir': 'api_cache',
-                'journal_dir': '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal'
+                'journal_dir': '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal',
+                'single_entry_mode': False
             }
         
         # Set configuration values
@@ -32,6 +33,7 @@ class Config:
         self.output_dir = Path(config.get('output_dir', 'output'))
         self.api_cache_dir = Path(config.get('api_cache_dir', 'api_cache'))
         self.journal_dir = Path(os.path.expanduser(config.get('journal_dir', '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/OV2024/Journal')))
+        self.single_entry_mode = config.get('single_entry_mode', False)
 
     def setup_directories(self) -> None:
         """Create necessary directories if they don't exist"""
@@ -52,21 +54,22 @@ logging.basicConfig(
 )
 
 def extract_date_and_title_from_filename(filename):
-    """Extract date and title from filename (assuming format like YYYY-MM-DD-title.md)"""
+    """Extract date and title from filename (assuming format like YYYY-MM-DD-title.md)
+    If no date in filename, use file's modification time"""
     # Remove .md extension
     filename = filename.replace('.md', '')
     
     # Extract date
     date_match = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
-    if not date_match:
-        return None, None
-        
-    date = date_match.group(1)
-    
-    # Extract title (everything after the date)
-    title = filename[filename.find(date) + len(date):].strip('-')
-    
-    return date, title
+    if date_match:
+        date = date_match.group(1)
+        # Extract title (everything after the date)
+        title = filename[filename.find(date) + len(date):].strip('-')
+        return date, title
+    else:
+        # If no date in filename, use the entire filename as title
+        title = filename
+        return None, title
 
 def extract_time_from_title(title):
     """Extract time from title if present (format: 10am / 7pm)"""
@@ -147,13 +150,29 @@ def extract_title_from_heading(content):
 
 def process_markdown_file(file_path):
     """Process a single markdown file and extract sections"""
-    # Get date and title from filename and skip if no date found
+    # Get date and title from filename
     date, title = extract_date_and_title_from_filename(file_path.name)
+    
+    # If no date in filename, get it from file metadata
     if not date:
-        return []
+        # Get file's modification time
+        mtime = file_path.stat().st_mtime
+        date = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
         
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
+    
+    # If single_entry_mode is enabled, treat the entire file as one entry
+    if config.single_entry_mode:
+        # Skip if content is empty or only contains links/code
+        if not content.strip() or is_only_links_or_code(content):
+            return []
+            
+        # Extract time from title if present
+        time = extract_time_from_title(title)
+        
+        # Create a single entry with the entire content
+        return [(date, title, "Entry", content, time)]
     
     # Split content by h2 headers
     sections = re.split(r'(?:^|\n)## ', content)

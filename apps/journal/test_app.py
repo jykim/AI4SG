@@ -1,8 +1,13 @@
+#!/usr/bin/env python3
+"""
+Tests for the Journal Analysis Dashboard
+"""
+
 import logging
 from pathlib import Path
 import dash
 import dash_bootstrap_components as dbc
-from apps.journal.app import (
+from .app import (
     Config as BaseConfig,
     AppState,
     create_layout,
@@ -14,6 +19,10 @@ import pandas as pd
 from dash import Input, Output, html
 import os
 import pytest
+import sys
+
+# Add parent directory to Python path for imports
+sys.path.append(str(Path(__file__).parent.parent))
 
 # Configure basic logging first
 logging.basicConfig(

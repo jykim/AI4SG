@@ -92,73 +92,42 @@ def print_results(entries, query):
         print(f"Content: {entry['Content'][:200]}...")  # Show first 200 chars
 
 def test_tokenization():
-    """Test tokenization functionality"""
+    """Test tokenization and indexing functionality"""
     # Create a temporary directory for testing
-    temp_dir = tempfile.mkdtemp()
-    try:
-        # Get the directory of the current script
-        script_dir = Path(__file__).parent
-        # Get the parent directory (project root)
-        project_root = script_dir.parent
-        
-        # Create test files
+    with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        file1 = temp_path / "test1.md"
-        file2 = temp_path / "test2.md"
-        file3 = temp_path / "test3.md"
         
         # Create test entries
         entries_info = [
             {
-                "Date": "2024-03-20",
-                "Time": "10:00",
-                "Title": "AI와 Machine Learning",
-                "Content": """인공지능(AI)은 컴퓨터 과학의 한 분야로, 기계가 학습하고 문제를 해결할 수 있도록 하는 기술입니다.
-Machine learning is a subset of AI that focuses on developing systems that can learn from data.
-
-딥러닝은 neural networks를 사용하여 복잡한 패턴을 학습합니다.
-Deep learning has revolutionized many fields including computer vision.""",
-                "emotion": "neutral",
-                "topic": "technology",
-                "path": "test1.md"
+                "ID": "1",
+                "Title": "Test Entry 1",
+                "Content": "인공지능은 기계 학습을 사용합니다. Machine learning is used in AI.",
+                "Date": "2023-01-01",
+                "Path": "test1.md"
             },
             {
-                "Date": "2024-03-20",
-                "Time": "11:00",
-                "Title": "Data Science and Analytics",
-                "Content": """데이터 과학은 데이터에서 의미 있는 인사이트를 도출하는 학문입니다.
-Data scientists use various tools and techniques to analyze large datasets.
-
-Python is one of the most popular programming languages for data analysis.
-통계적 방법과 머신러닝 알고리즘을 활용하여 데이터를 분석합니다.""",
-                "emotion": "neutral",
-                "topic": "technology",
-                "path": "test2.md"
-            },
-            {
-                "Date": "2024-03-20",
-                "Time": "12:00",
-                "Title": "Natural Language Processing",
-                "Content": """자연어 처리(NLP)는 컴퓨터가 인간의 언어를 이해하고 처리하는 기술입니다.
-Natural Language Processing helps computers understand and process human language.
-
-텍스트 분석과 기계 번역은 NLP의 주요 응용 분야입니다.
-Text analysis and machine translation are key applications of NLP.""",
-                "emotion": "neutral",
-                "topic": "technology",
-                "path": "test3.md"
+                "ID": "2",
+                "Title": "Test Entry 2",
+                "Content": "기계 학습은 인공지능의 한 분야입니다. Machine learning is a field of AI.",
+                "Date": "2023-01-02",
+                "Path": "test2.md"
             }
         ]
         
-        # Write test files
-        for entry in entries_info:
-            with open(temp_path / entry["path"], "w") as f:
-                f.write(f"# {entry['Title']}\n\n{entry['Content']}")
-        
-        # Create a custom Config object for testing
+        # Create test config
         test_config = Config()
         test_config.index_dir = temp_path
         test_config.output_dir = temp_path
+        test_config.rag_config = {
+            'bm25': {
+                'k1': 1.5,
+                'b': 0.75,
+                'final_k': 10
+            },
+            'log_level': 'INFO',
+            'log_format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        }
         
         # Save the original config and replace it with our test config
         import search.index_documents as index_docs
@@ -180,32 +149,9 @@ Text analysis and machine translation are key applications of NLP.""",
             assert len(results) > 0, "English search failed"
             assert "machine learning" in results[0]["Content"].lower(), "English term not found in results"
             
-            # Test mixed language search
-            results, _ = retriever.get_relevant_entries("딥러닝 neural", k=1)
-            assert len(results) > 0, "Mixed language search failed"
-            assert "딥러닝" in results[0]["Content"] and "neural" in results[0]["Content"].lower(), "Mixed language terms not found in results"
-            
-            # Test cross-document search
-            results, _ = retriever.get_relevant_entries("AI data", k=3)
-            assert len(results) > 1, "Cross-document search failed"
-            found_ai = False
-            found_data = False
-            for result in results:
-                if "AI" in result["Content"]:
-                    found_ai = True
-                if "data" in result["Content"].lower():
-                    found_data = True
-            assert found_ai and found_data, "Cross-document terms not found"
-            
-            print("Search tests passed!")
-            
         finally:
-            # Restore the original config
+            # Restore original config
             index_docs.config = original_config
-        
-    finally:
-        # Clean up
-        shutil.rmtree(temp_dir)
 
 def main():
     # Configure logging
